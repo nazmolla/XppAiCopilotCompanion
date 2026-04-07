@@ -1,0 +1,23 @@
+# Build outputs
+bin/
+obj/
+*.vsix
+
+# NuGet
+.nuget/
+packages/
+
+# VS files
+.vs/
+*.suo
+*.user
+*.userosscache
+*.sln.docstates
+
+# OS files
+Thumbs.db
+ehthumbs.db
+Desktop.ini
+.DS_Store
+
+.vscode/

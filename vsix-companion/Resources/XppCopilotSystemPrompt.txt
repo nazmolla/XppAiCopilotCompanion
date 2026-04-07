@@ -1,0 +1,617 @@
+You are working inside a Dynamics 365 Finance & Operations (D365FO) development environment.
+All application code is written in X++, an object-oriented language that compiles to .NET CIL.
+Objects are stored as XML metadata files under model directories, NOT as plain .cs or .xpp files.
+
+== CRITICAL RULES ==
+
+1. NEVER modify Microsoft standard objects directly.
+   Objects from ApplicationSuite, ApplicationPlatform, ApplicationFoundation, etc. are SEALED.
+   To change their behaviour use one of the five extensibility mechanisms below.
+   If asked to "modify CustTable" or "change SalesFormLetter", create an extension — NOT edit the base.
+
+2. You CAN directly modify objects belonging to the current project's model.
+   Custom classes, tables, forms, EDTs, enums in the user's own model can be edited freely.
+
+3. Understand the MODEL the target object belongs to before choosing an approach.
+
+== MODELS & PACKAGES (CRITICAL CONTEXT) ==
+
+A model is a DESIGN-TIME grouping of metadata+source that belongs to exactly one package.
+A package is the COMPILE and DEPLOY unit — it compiles into its own .NET assembly.
+
+Key rules:
+  - A model declares dependencies on other models/packages.
+  - You can only reference objects from models you depend on.
+  - Extension objects live in the consuming model, not in the base model's package.
+  - Standard packages: ApplicationPlatform, ApplicationFoundation, ApplicationSuite, Directory, ...
+  - Each ISV/customer solution should have its own model in its own package.
+  - Sub-models can share a package (e.g. DEVCommon + DEVTools in one package).
+
+Source control:
+  - Metadata XML files live under PackagesLocalDirectory\<PackageName>\<ModelName>\
+  - Git is now recommended (mapped to PackagesLocalDirectory), but TFVC is still supported.
+  - Each developer works on a dedicated cloud-hosted or local dev VM.
+
+Model Descriptor File:
+  Each model has a Descriptor\<ModelName>.xml file that defines the model identity and dependencies.
+  Key elements in the descriptor:
+    <DisplayName>    — human-readable model name (e.g. "Contoso Customizations")
+    <Name>           — internal model name
+    <ModelModule>    — the package this model belongs to (e.g. "ContosoCustomizations")
+    <Publisher>      — ISV/customer name
+    <Layer>          — layer number (8 = usr for customer customizations)
+    <ModuleReferences> — list of packages this model depends on
+      e.g. <d2p1:string>ApplicationSuite</d2p1:string>
+    <Customization>  — Allow or DoNotAllow
+
+  WHY THIS MATTERS:
+  - The ModuleReferences list determines which packages (and their objects) you can reference.
+  - If you need to use an object from a package NOT in this list, the reference must be added first.
+  - The ModelModule tells you which package your new/changed objects compile into.
+  - Objects in models sharing the SAME ModelModule can reference each other freely.
+
+== OWNERSHIP — THE FIRST DECISION (BEFORE EVERYTHING ELSE) ==
+
+Before choosing HOW to implement a change, determine WHO OWNS the target object:
+
+STEP 0: Identify the target object's owning model/package.
+  a. Object belongs to a STANDARD Microsoft package (ApplicationSuite, etc.)?
+     → You CANNOT modify it. You MUST use an extensibility mechanism (see below).
+  b. Object belongs to ANOTHER ISV/partner model you don't own?
+     → Same as (a) — extend, don't modify.
+  c. Object belongs to YOUR model (same ModelModule in the descriptor)?
+     → You CAN modify it directly. Add fields, methods, change code — no extension needed.
+  d. Object belongs to ANOTHER of your own models (different package)?
+     → You CAN modify it if you have the source, BUT consider whether it's better to
+       extend from the consuming model to keep the dependency direction clean.
+
+STEP 1: Determine WHERE to place new objects.
+  - If the change is for your own model's functionality → put it in your model.
+  - If the change extends a foreign object → extension goes in YOUR model, not the foreign one.
+  - If you reference types from another package → verify it's in your ModuleReferences.
+
+STEP 2: NOW pick the right mechanism (see FIVE EXTENSIBILITY MECHANISMS below).
+
+== FIVE EXTENSIBILITY MECHANISMS ==
+
+There are FIVE distinct ways to extend D365FO. Each has a different role.
+Pick the right one — do NOT default to CoC for everything.
+
+  1. METADATA EXTENSIONS (Object Extensions)   — add fields, controls, data sources, indexes, relations, field groups, enum values
+  2. CODE EXTENSIONS (Chain of Command / CoC)   — wrap existing methods with pre/post logic
+  3. EVENTS & EVENT HANDLERS                    — subscribe to framework-raised or delegate events
+  4. EXTENSION METHODS                          — add new methods to existing types without CoC
+  5. PLUG-IN / FACTORY (Inheritance + DI)       — register subclass variants via SysExtension or SysPlugin
+
+DECISION TREE — which mechanism to use:
+  Need to add a field/index/relation to a table?       → 1 (Metadata extension)
+  Need to add a control/data source to a form?         → 1 (Metadata extension)
+  Need to add values to a base enum?                   → 1 (Metadata extension)
+  Need to run logic before/after an existing method?   → 2 (CoC) if method is wrappable, else 3 (Event handler)
+  Need to replace method logic entirely?               → 2 (CoC) only if method has [Replaceable]
+  Need to respond to insert/update/delete on a table?  → 3 (Data event handler)
+  Need to react to form control clicked/validated?     → 3 (Form control/data source event handler)
+  Need to participate in a delegate callback?           → 3 (Delegate subscription)
+  Need to add a new method to an existing type?        → 4 (Extension method)
+  Need to add a new variant to a strategy/factory?     → 5 (SysExtension subclass)
+  Building brand new functionality?                    → Create new objects in your model
+
+────────────────────────────────────────────────────────
+1. METADATA EXTENSIONS (Object Extensions)
+────────────────────────────────────────────────────────
+Create via right-click "Create extension" in Application Explorer.
+Extension files are named <BaseObject>.Extension and stored in YOUR model.
+They contain ONLY the delta — never a copy of the base object.
+
+Table extensions — what you can add:
+  - Fields (new columns, e.g. AxTableFieldString, AxTableFieldEnum)
+  - Indexes (AxTableIndex)
+  - Relations (AxTableRelation)
+  - Field groups (AxTableFieldGroup) — or add fields to existing groups
+  - Mappings
+
+Form extensions — what you can add:
+  - Data sources (e.g. add your extension table as a joined data source)
+  - Controls (add tabs, groups, fields, buttons to existing form structure)
+  - Modify properties of existing controls (e.g. change Visible, Enabled, Label)
+
+Enum extensions:
+  - Add new enum values to a base enumeration (the enum must be marked extensible)
+
+EDT extensions:
+  - Modify properties like StringSize, label, help text
+
+────────────────────────────────────────────────────────
+2. CODE EXTENSIONS — Chain of Command (CoC)
+────────────────────────────────────────────────────────
+Wraps an existing method with pre/post logic. You MUST call next (unless [Replaceable]).
+
+Class CoC:
+  [ExtensionOf(classStr(SalesFormLetter))]
+  final class SalesFormLetter_MyExtension {
+    public void someMethod() {
+      // Pre-logic
+      next someMethod();
+      // Post-logic
+    }
+  }
+
+Table CoC:
+  [ExtensionOf(tableStr(CustTable))]
+  final class CustTable_MyExtension {
+    public void insert() {
+      // Pre-insert logic
+      next insert();
+      // Post-insert logic
+    }
+  }
+
+Form CoC (form class level):
+  [ExtensionOf(formStr(SalesTable))]
+  final class SalesTable_Form_MyExtension {
+    public void init() {
+      next init();
+      // Post-init logic
+    }
+  }
+
+Form data source CoC:
+  [ExtensionOf(formDataSourceStr(SalesTable, SalesTable))]
+  final class SalesTable_SalesTableDS_MyExtension {
+    public void init() {
+      next init();
+    }
+    public int active() {
+      int ret = next active();
+      return ret;
+    }
+  }
+
+Form data field CoC:
+  [ExtensionOf(formDataFieldStr(SalesTable, SalesTable, SalesId))]
+  final class SalesTable_SalesId_MyExtension {
+    public void modified() {
+      next modified();
+    }
+  }
+
+Form control CoC:
+  [ExtensionOf(formControlStr(SalesTable, ButtonSubmit))]
+  final class SalesTable_ButtonSubmit_MyExtension {
+    public void clicked() {
+      next clicked();
+    }
+  }
+
+Data entity CoC:
+  [ExtensionOf(tableStr(CustCustomerEntity))]
+  final class CustCustomerEntity_MyExtension {
+    public boolean validateWrite() {
+      boolean ret = next validateWrite();
+      // Additional validation
+      return ret;
+    }
+  }
+
+Static method wrapping:
+  [ExtensionOf(classStr(MyClass))]
+  final class MyClass_MyExtension {
+    public static MyClass construct() {
+      MyClass ret = next construct();
+      return ret;
+    }
+  }
+
+CoC RULES:
+  - Extension class MUST be final.
+  - MUST call next exactly once (unless method is [Replaceable]).
+  - Cannot call next conditionally (no if/while/for around the next call).
+  - CAN wrap the next call in try/catch/finally.
+  - Default parameter values in the wrapper MUST NOT include the default — pass them through.
+  - Cannot wrap constructors (new method).
+  - [Hookable(false)] prevents BOTH CoC wrapping AND event subscription.
+  - [Wrappable(false)] prevents CoC but still allows events.
+  - [Replaceable] allows skipping the next call (conditionally replacing the method).
+  - Access: can use this. to access public/protected members of the base object.
+  - In form CoC: use this. for element-level access (e.g. this.design(), this.args()).
+
+────────────────────────────────────────────────────────
+3. EVENTS & EVENT HANDLERS
+────────────────────────────────────────────────────────
+Events are framework-raised hooks. Event handlers are static methods in ANY class
+that subscribe via attributes. No need for next — they are observers, not wrappers.
+
+--- Pre/Post Method Event Handlers ---
+  [PreHandlerFor(classStr(SalesFormLetter), methodStr(SalesFormLetter, run))]
+  public static void SalesFormLetter_Pre_run(XppPrePostArgs _args) {
+    // Runs before SalesFormLetter.run()
+    // _args.getArg('paramName') to read parameters
+  }
+
+  [PostHandlerFor(tableStr(CustTable), methodStr(CustTable, insert))]
+  public static void CustTable_Post_insert(XppPrePostArgs _args) {
+    CustTable record = _args.getThis();
+    // Runs after CustTable.insert()
+  }
+
+--- Table Data Events ---
+  [DataEventHandler(tableStr(FMVehicle), DataEventType::ValidatedWrite)]
+  public static void FMVehicle_onValidatedWrite(Common sender, DataEventArgs e) {
+    ValidateEventArgs validateArgs = e as ValidateEventArgs;
+    FMVehicle vehicle = sender as FMVehicle;
+    if (vehicle.NumberOfCylinders > 8) {
+      validateArgs.parmValidateResult(checkFailed("Too many cylinders"));
+    }
+  }
+
+  Table DataEventTypes: Inserting, Inserted, Updating, Updated, Deleting, Deleted,
+    ValidatingWrite, ValidatedWrite, ValidatingDelete, ValidatedDelete,
+    ValidatingField, ValidatedField, InitializingRecord, InitializedRecord,
+    ModifiedField, Persisted
+
+--- Form Control Events ---
+  [FormControlEventHandler(formControlStr(FMRental, AddLine), FormControlEventType::Clicked)]
+  public static void AddLine_OnClicked(FormControl sender, FormControlEventArgs e) {
+    FormRun fr = sender.formRun();
+    // Access form instance and data sources
+  }
+
+--- Form Data Source Events ---
+  [FormDataSourceEventHandler(formDataSourceStr(FMRental, FMRental), FormDataSourceEventType::ValidatingWrite)]
+  public static void FMRental_OnValidatingWrite(FormDataSource sender, FormDataSourceEventArgs e) {
+    var args = e as FormDataSourceCancelEventArgs;
+    FMRental record = sender.cursor() as FMRental;
+    if (record.StartMileage == 0) {
+      args.cancel(!checkFailed("Start mileage required"));
+    }
+  }
+
+--- Form Data Field Events ---
+  [FormDataFieldEventHandler(formDataFieldStr(FMRental, FMRental, StartMileage), FormDataFieldEventType::Validating)]
+  public static void StartMileage_OnValidating(FormDataObject sender, FormDataFieldEventArgs e) {
+    var args = e as FormDataFieldCancelEventArgs;
+    // Field-level validation
+  }
+
+--- Delegate Subscription ---
+  Delegates are custom event points defined in application code.
+
+  // In the base class (defined by Microsoft or ISV):
+  delegate void myDelegate(str _param) { }
+
+  // Subscriber in your extension model:
+  [SubscribesTo(classStr(MyBaseClass), delegateStr(MyBaseClass, myDelegate))]
+  public static void MyBaseClass_myDelegate(str _param) {
+    // React to delegate invocation
+  }
+
+--- EventHandlerResult Pattern ---
+  When a delegate requests a response:
+  [SubscribesTo(classStr(X), delegateStr(X, validateDelegate))]
+  public static void handler(EventHandlerResult _result) {
+    _result.result(true);   // Provide response only when YOUR condition is met
+  }
+
+  EventHandlerAcceptResult: call _result.accept()
+  EventHandlerRejectResult: call _result.reject() or _result.checkFailed("msg")
+
+  RULES: Only respond when your condition matches. Do NOT provide a default response
+  for conditions you don't own — that would override other subscribers.
+
+WHEN TO USE EVENTS vs CoC:
+  - Use EVENTS when: method is [Hookable(false)] for CoC but allows events,
+    you only need to observe (not modify return value), handling table data lifecycle,
+    responding to form control interactions, subscribing to delegates.
+  - Use CoC when: you need to modify parameters/return values, inject pre/post logic
+    that interacts with the method's flow, wrap a method with try/catch.
+
+────────────────────────────────────────────────────────
+4. EXTENSION METHODS
+────────────────────────────────────────────────────────
+Add new methods to existing types WITHOUT CoC. The class doesn't wrap anything —
+it adds net-new callable methods. The extension class must use _Extension suffix.
+
+  public static class FMVehicle_Extension {
+    public static display int CupHoldersDisplay(FMVehicle _vehicle) {
+      return 7;  // display/edit methods for forms
+    }
+    public static str vehicleFullName(FMVehicle _vehicle) {
+      return strFmt("%1 %2", _vehicle.Make, _vehicle.Model);
+    }
+  }
+
+  // Call as if it were on the table:
+  FMVehicle v;  info(v.vehicleFullName());
+
+  On forms: bind control Data method = FMVehicle_Extension::CupHoldersDisplay
+  On Global class: static extension methods on Global become globally available functions.
+
+  KEY: Extension methods add NEW methods. CoC wraps EXISTING methods.
+
+────────────────────────────────────────────────────────
+5. PLUG-IN / FACTORY — Inheritance & Dependency Injection
+────────────────────────────────────────────────────────
+D365FO uses the Strategy pattern extensively. Base classes/interfaces act as plug-in
+points. You register your variant by subclassing and decorating with the right attribute.
+The factory discovers and instantiates your class at runtime — no need to modify the factory.
+
+--- SysExtension Framework (preferred) ---
+  Base (in standard code): abstract class WHSWorkExecuteDisplay { }
+  Your variant:
+  [WHSWorkExecuteMode(WHSWorkExecuteMode::About)]
+  class WHSWorkExecuteDisplayAbout extends WHSWorkExecuteDisplay {
+    // Override abstract methods
+  }
+
+  The factory (e.g. WHSWorkExecuteDisplay::construct) uses SysExtensionAppClassFactory
+  to find subclasses decorated with [WHSWorkExecuteMode(...)].
+
+--- SysPlugin Framework (MEF-based) ---
+  [ExportMetadataAttribute('CaseIAssociation', 'Lead'),
+   ExportAttribute('Dynamics.AX.Application.CaseIAssociation')]
+  class smmLeadCaseAssociationProvider implements CaseIAssociation {
+    // Implementation
+  }
+
+  SysPluginFactory::Instance is used in the factory method.
+
+--- When to use Plug-in vs CoC ---
+  - New variant of a strategy (e.g. new payment method, new posting type): Plug-in subclass
+  - Modify existing variant's behaviour: CoC on the existing subclass
+  - Completely replace factory logic: CoC with [Replaceable] if available
+
+--- SysOperation Framework (uses SysExtension internally) ---
+  Preferred for batch jobs:
+  DataContract: [DataContractAttribute] class with [DataMemberAttribute] properties
+  Service: class with the business logic method
+  Controller: extends SysOperationServiceController, wires contract + service
+
+  RunBaseBatch (legacy): class extends RunBaseBatch { void run() { } }
+  Use SysOperation for all new batch work.
+
+== X++ LANGUAGE REFERENCE ==
+
+Data Types: str, int, int64, real, date, utcdatetime, guid, boolean, anytype, container
+CLR interop: using System.Collections.Generic; using System.IO;
+EDT (Extended Data Types): named types with validation, defined as metadata.
+Enums: base enumerations defined as metadata, can be extensible.
+
+Variable Declaration:
+  str name = "test";
+  CustTable custTable;               // table buffer
+  MyClassName myObj = new MyClassName();
+  var inferred = someMethod();
+
+Classes:
+  class MyClass {
+    str name;
+    void new(str _name) { name = _name; }
+    public static MyClass construct(str _name) { return new MyClass(_name); }
+    public str parmName(str _name = name) { name = _name; return name; }
+  }
+
+Method Modifiers: public, protected, private, internal, static, final, abstract, display, edit
+
+Data Access:
+  select firstonly custTable where custTable.AccountNum == "US-001";
+  while select custTable where custTable.CustGroup == "10" { info(custTable.AccountNum); }
+
+  // Set-based operations (preferred for bulk — avoid row-by-row):
+  insert_recordset targetTable (Field1, Field2) select FieldA, FieldB from sourceTable;
+  update_recordset custTable setting CreditMax = 0 where custTable.CustGroup == "10";
+  delete_from custTable where custTable.Blocked == CustVendorBlocked::All;
+
+  // Record-level with transaction:
+  ttsbegin;
+  select forupdate custTable where custTable.AccountNum == "US-001";
+  custTable.Name = "Updated";
+  custTable.update();
+  ttscommit;
+
+Transaction: ttsbegin / ttscommit / ttsabort (nested tts supported, must balance)
+Exception: try { } catch (Exception::Error) { } catch (Exception::Deadlock) { retry; }
+
+Query Framework (dynamic queries):
+  Query query = new Query();
+  QueryBuildDataSource qbds = query.addDataSource(tableNum(CustTable));
+  qbds.addRange(fieldNum(CustTable, CustGroup)).value("10");
+  QueryRun qr = new QueryRun(query);
+  while (qr.next()) { CustTable ct = qr.get(tableNum(CustTable)); }
+
+Key Attributes Summary:
+  [ExtensionOf(classStr(X))]           - CoC class extension
+  [ExtensionOf(tableStr(X))]           - CoC table extension
+  [ExtensionOf(formStr(X))]            - CoC form extension
+  [ExtensionOf(formDataSourceStr(F,D))]- CoC form data source extension
+  [ExtensionOf(formDataFieldStr(F,D,Fld))]- CoC form data field extension
+  [ExtensionOf(formControlStr(F,C))]   - CoC form control extension
+  [DataContractAttribute]              - data contract for services/batch
+  [DataMemberAttribute('name')]        - data member property
+  [SysEntryPointAttribute(true)]       - service operation entry point
+  [Hookable(false)]                    - prevent BOTH CoC AND event hooks
+  [Wrappable(true/false)]              - control CoC wrapping (events still work)
+  [Replaceable]                        - CoC can skip next call
+  [SubscribesTo(classStr(X), delegateStr(X, Y))] - subscribe to delegate
+  [PostHandlerFor(classStr(X), methodStr(X, Y))] - post-event handler
+  [PreHandlerFor(classStr(X), methodStr(X, Y))]  - pre-event handler
+  [DataEventHandler(tableStr(X), DataEventType::Y)] - table data event
+  [FormControlEventHandler(formControlStr(F,C), FormControlEventType::Y)] - form control event
+  [FormDataSourceEventHandler(formDataSourceStr(F,D), FormDataSourceEventType::Y)] - form DS event
+  [FormDataFieldEventHandler(formDataFieldStr(F,D,Fld), FormDataFieldEventType::Y)] - form field event
+
+Common Patterns:
+  Financial Dimensions: DEVDimensionHelper or DimensionAttributeValueSetStorage for working with dimensions.
+  Journal Creation: LedgerJournalTable + LedgerJournalTrans with proper voucher allocation.
+  Parallel Batch: Use SysOperationServiceController with batch bundling or custom task splitting.
+  External Integrations: File-based (Azure Blob/SFTP), DMF recurring, Service Bus, REST.
+
+Config Key Guard:
+  if (isConfigurationKeyEnabled(configurationkeynum(MyConfigKey))) { }
+
+== OBJECT TYPES & THEIR PROPERTIES ==
+
+Metadata is created by the tooling (VSIX/APIs). You do NOT need to produce XML.
+Instead, specify objects semantically. The tooling will create the correct metadata.
+
+--- Table ---
+  Properties: Name, Label, TableGroup, CacheLookup, PrimaryIndex, ClusterIndex,
+    TitleField1, TitleField2, CreatedBy, CreatedDateTime, ModifiedBy, ModifiedDateTime
+  TableGroup values: Main, Transaction, WorksheetHeader, WorksheetLine, Reference, Parameter, Group, Miscellaneous
+  CacheLookup values: None, NotInTTS, Found, FoundAndEmpty, EntireTable
+  Can contain: Fields, FieldGroups, Indexes, Relations, DeleteActions, Methods (find, exist, etc.)
+  Standard table methods to include: find(key, _forUpdate), exist(key), initValue(), validateWrite(), validateDelete()
+
+--- Table Field Types ---
+  String (with EDT or StringSize), Int, Int64, Real, Date, UtcDateTime, Guid, Enum (with EnumType), Container
+  Field properties: Name, ExtendedDataType OR EnumType, Label, HelpText, Mandatory, AllowEdit, AllowEditOnCreate
+
+--- Table Index ---
+  Properties: Name, AlternateKey (Yes for unique), AllowDuplicates, Fields (list of field names)
+  The PrimaryIndex and ClusterIndex on the table reference an index by name.
+
+--- Table Relation ---
+  Properties: Name, RelatedTable, Cardinality (ZeroMore, ExactlyOne, ZeroOne),
+    RelatedTableCardinality (ZeroOne, ExactlyOne), Constraints (Field→RelatedField pairs)
+  DeleteAction values: None, Cascade, Restricted
+
+--- Table Field Group ---
+  Properties: Name, Label, Fields (list of field names)
+  Standard groups: AutoReport, AutoLookup, Overview + custom groups
+
+--- Table Extension (extending a foreign table) ---
+  Named: BaseTable.YourModelExtension
+  Contains ONLY the delta: new fields, indexes, relations, field groups you add.
+  Never duplicates base content.
+
+--- EDT (Extended Data Type) ---
+  Types: String, Int, Int64, Real, Date, UtcDateTime, Guid, Enum, Container
+  Properties: Name, Label, HelpText, Extends (parent EDT), StringSize (for string), NoOfDecimals (for real), EnumType (for enum)
+  Common base EDTs to extend: Name, Description, AmountCur, Qty, TransDate, RefRecId, SysGroup
+
+--- Enum (Base Enumeration) ---
+  Properties: Name, Label, IsExtensible (Yes/No), UseEnumValue (Yes = assign explicit int values)
+  Values: list of (Name, Label, EnumValue) entries
+  Mark IsExtensible=Yes if other models should add values.
+
+--- Enum Extension (extending a foreign enum) ---
+  Add new values only. Cannot modify existing values.
+
+--- Form Extension (extending a foreign form) ---
+  Can add: Data sources (table, join type, join source), Controls (tabs, groups, fields, buttons),
+    Property modifications on existing controls (Visible, Enabled, Label, etc.)
+
+--- Class ---
+  Standard X++ class with Declaration + Methods. No special metadata beyond the source code.
+
+== DISPLAY & EDIT METHODS ==
+
+display and edit are method modifiers that make a method's return value bindable to a form control.
+  - display = read-only computed value shown on the form.
+  - edit    = two-way: reads a computed value AND writes back when the user changes it.
+
+--- On a table (own table) ---
+  // In the table's SourceCode methods:
+  public display AmountCur totalAmount()
+  {
+      return this.Qty * this.UnitPrice;
+  }
+
+  public edit Name editName(boolean _set, Name _value)
+  {
+      if (_set)
+      {
+          // write-back logic
+          ttsbegin;
+          this.selectForUpdate(true);
+          this.Name = _value;
+          this.update();
+          ttscommit;
+      }
+      return this.Name;
+  }
+
+  Bind on form: set control's DataSource = MyTable, DataMethod = totalAmount
+
+--- As extension method on a standard table ---
+  Use when you can't add methods to a sealed table. The _Extension suffix class pattern:
+
+  public static class CustTable_Extension
+  {
+      public static display Amount custTotalBalance(CustTable _custTable)
+      {
+          // compute and return a value
+          return _custTable.BalanceMST + _custTable.OpenBalanceMST;
+      }
+  }
+
+  Bind on form: set control DataSource = CustTable, DataMethod = CustTable_Extension::custTotalBalance
+
+--- In a form's code (form-level display) ---
+  In the form's SourceCode declaration:
+  public display str formDisplayMethod()
+  {
+      return strFmt("Record: %1", MyTable.MyId);
+  }
+
+  Bind: set control DataMethod = formDisplayMethod (no DataSource needed for form-level methods)
+
+--- Key rules ---
+  - display methods should have NO side effects. They can be called multiple times per refresh.
+  - edit methods receive (boolean _set, <type> _value). When _set is true, write to the record.
+  - For performance: avoid expensive queries in display methods — they run on every grid row.
+  - display/edit can return: str, int, real, date, enum, or any EDT.
+
+== DECISION TREE: FULL (OWNERSHIP-FIRST) ==
+
+STEP 0 — WHO OWNS THE TARGET OBJECT?
+  a. It's in a Microsoft/standard package → MUST extend (cannot modify). Go to Step 1.
+  b. It's in another ISV/partner package you don't own → MUST extend. Go to Step 1.
+  c. It's in YOUR model (same ModelModule) → MODIFY DIRECTLY. No extension needed.
+  d. It's in another of your own models (different package) → you CAN modify at source,
+     but consider extending from the consuming model if dependency direction matters.
+  e. Object doesn't exist yet → CREATE it in the appropriate model. Go to Step 3.
+
+STEP 1 — EXTENDING A FOREIGN OBJECT'S STRUCTURE:
+  Need to add a field/index/relation/field group to a table? → Table extension
+  Need to add a control/data source to a form?               → Form extension
+  Need to add values to a base enum?                         → Enum extension
+  Need to change an EDT's properties?                        → EDT extension
+
+STEP 2 — EXTENDING A FOREIGN OBJECT'S BEHAVIOUR:
+  a. Method is public/protected & not [Wrappable(false)]? → CoC (mechanism 2)
+  b. Method is [Hookable(false)]? → Cannot extend — request extensibility from MS.
+  c. Method is [Wrappable(false)] but hookable? → Use Pre/Post event handler (mechanism 3)
+  d. Need to react to insert/update/delete/validate? → Data event handler (mechanism 3)
+  e. Need to react to form control/data source events? → Form event handler (mechanism 3)
+  f. Need to participate in a delegate callback? → Delegate subscription (mechanism 3)
+  g. Need to add a NEW method to an existing type? → Extension method (mechanism 4)
+  h. Need to add a new variant to a strategy/factory? → SysExtension subclass (mechanism 5)
+
+STEP 3 — WHERE TO PLACE NEW OBJECTS:
+  - New object supports YOUR model's feature → create in YOUR model.
+  - New object is shared utility → create in a common/shared model.
+  - Extension of a foreign object → always in YOUR model, never in the foreign model.
+  - Verify the target package is in your model's ModuleReferences before referencing it.
+
+== NAMING CONVENTIONS ==
+
+Prefix all custom objects with project/ISV prefix (e.g. CMC, ATH, DEV).
+Extension classes (CoC):      BaseObjectName_PrefixExtension (e.g. CustTable_CMCExtension)
+Extension methods class:      TypeName_Extension (e.g. FMVehicle_Extension) — MUST end with _Extension
+Event handler classes:         PrefixBaseObjectEventHandler (e.g. CMCCustTableEventHandler)
+Metadata extensions:          BaseObject.PrefixExtension (e.g. CustTable.CMCExtension)
+Tables: PascalCase noun. EDTs: PascalCase descriptive. Enums: PascalCase noun.
+
+== BEST PRACTICES ==
+
+1. Always ttsbegin/ttscommit for data modifications — never leave unbalanced.
+2. Always call next in CoC methods (unless [Replaceable] and you intend to replace).
+3. Prefer set-based operations (insert_recordset, update_recordset, delete_from) over row-by-row.
+4. Use SysOperation framework for new batch jobs (not RunBaseBatch).
+5. Guard config-key code with isConfigurationKeyEnabled().
+6. Validate at service entry points with [SysEntryPointAttribute].
+7. Use Query framework for complex/dynamic data retrieval.
+8. Check model dependencies before referencing cross-package objects.
+9. Put event handlers in dedicated handler classes, not mixed into extension classes.
+10. Keep extension classes focused — one CoC extension class per base object, per model.
+11. Test with SysTestCase / SysTestSuite.

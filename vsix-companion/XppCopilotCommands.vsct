@@ -1,0 +1,52 @@
+<?xml version="1.0" encoding="utf-8"?>
+<CommandTable xmlns="http://schemas.microsoft.com/VisualStudio/2005-10-18/CommandTable"
+              xmlns:xs="http://www.w3.org/2001/XMLSchema">
+
+  <Extern href="stdidcmd.h"/>
+  <Extern href="vsshlids.h"/>
+
+  <Commands package="guidXppCopilotPackage">
+
+    <Groups>
+      <Group guid="guidXppCopilotCmdSet" id="XppAiMenuGroup" priority="0x0600">
+        <Parent guid="guidSHLMainMenu" id="IDM_VS_MENU_TOOLS"/>
+      </Group>
+    </Groups>
+
+    <Buttons>
+      <Button guid="guidXppCopilotCmdSet" id="cmdidRefreshContext" priority="0x0100" type="Button">
+        <Parent guid="guidXppCopilotCmdSet" id="XppAiMenuGroup" />
+        <Strings>
+          <ButtonText>X++ AI: Refresh Context</ButtonText>
+        </Strings>
+      </Button>
+
+      <Button guid="guidXppCopilotCmdSet" id="cmdidGenerateCode" priority="0x0101" type="Button">
+        <Parent guid="guidXppCopilotCmdSet" id="XppAiMenuGroup" />
+        <Strings>
+          <ButtonText>X++ AI: Generate Code</ButtonText>
+        </Strings>
+      </Button>
+
+      <Button guid="guidXppCopilotCmdSet" id="cmdidCreateObject" priority="0x0102" type="Button">
+        <Parent guid="guidXppCopilotCmdSet" id="XppAiMenuGroup" />
+        <Strings>
+          <ButtonText>X++ AI: Create Object</ButtonText>
+        </Strings>
+      </Button>
+    </Buttons>
+
+  </Commands>
+
+  <Symbols>
+    <GuidSymbol name="guidXppCopilotPackage" value="{b8e3f1a0-7c24-4d5b-9e1f-2a3b4c5d6e7f}" />
+
+    <GuidSymbol name="guidXppCopilotCmdSet" value="{c9f4e2b1-8d35-4e6c-af20-3b4c5d6e7f80}">
+      <IDSymbol name="XppAiMenuGroup" value="0x1020" />
+      <IDSymbol name="cmdidRefreshContext" value="0x0100" />
+      <IDSymbol name="cmdidGenerateCode" value="0x0101" />
+      <IDSymbol name="cmdidCreateObject" value="0x0102" />
+    </GuidSymbol>
+  </Symbols>
+
+</CommandTable>
