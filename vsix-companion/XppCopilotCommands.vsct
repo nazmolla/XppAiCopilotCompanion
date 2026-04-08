@@ -7,9 +7,18 @@
 
   <Commands package="guidXppCopilotPackage">
 
+    <Menus>
+      <Menu guid="guidXppCopilotCmdSet" id="XppAiSubMenu" priority="0x0600" type="Menu">
+        <Parent guid="guidSHLMainMenu" id="IDG_VS_MM_TOOLSADDINS"/>
+        <Strings>
+          <ButtonText>X++ AI Copilot</ButtonText>
+        </Strings>
+      </Menu>
+    </Menus>
+
     <Groups>
       <Group guid="guidXppCopilotCmdSet" id="XppAiMenuGroup" priority="0x0600">
-        <Parent guid="guidSHLMainMenu" id="IDM_VS_MENU_TOOLS"/>
+        <Parent guid="guidXppCopilotCmdSet" id="XppAiSubMenu"/>
       </Group>
     </Groups>
 
@@ -34,6 +43,20 @@
           <ButtonText>X++ AI: Create Object</ButtonText>
         </Strings>
       </Button>
+
+      <Button guid="guidXppCopilotCmdSet" id="cmdidRegisterMcp" priority="0x0103" type="Button">
+        <Parent guid="guidXppCopilotCmdSet" id="XppAiMenuGroup" />
+        <Strings>
+          <ButtonText>X++ AI: Register/Start MCP Tools</ButtonText>
+        </Strings>
+      </Button>
+
+      <Button guid="guidXppCopilotCmdSet" id="cmdidMcpDiagnostics" priority="0x0104" type="Button">
+        <Parent guid="guidXppCopilotCmdSet" id="XppAiMenuGroup" />
+        <Strings>
+          <ButtonText>X++ AI: MCP Diagnostics</ButtonText>
+        </Strings>
+      </Button>
     </Buttons>
 
   </Commands>
@@ -42,10 +65,13 @@
     <GuidSymbol name="guidXppCopilotPackage" value="{b8e3f1a0-7c24-4d5b-9e1f-2a3b4c5d6e7f}" />
 
     <GuidSymbol name="guidXppCopilotCmdSet" value="{c9f4e2b1-8d35-4e6c-af20-3b4c5d6e7f80}">
+      <IDSymbol name="XppAiSubMenu" value="0x101F" />
       <IDSymbol name="XppAiMenuGroup" value="0x1020" />
       <IDSymbol name="cmdidRefreshContext" value="0x0100" />
       <IDSymbol name="cmdidGenerateCode" value="0x0101" />
       <IDSymbol name="cmdidCreateObject" value="0x0102" />
+      <IDSymbol name="cmdidRegisterMcp" value="0x0103" />
+      <IDSymbol name="cmdidMcpDiagnostics" value="0x0104" />
     </GuidSymbol>
   </Symbols>
 

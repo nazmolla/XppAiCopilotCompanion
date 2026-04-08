@@ -44,7 +44,7 @@
   </PropertyGroup>
 
   <ItemGroup>
-    <Compile Include="**\*.cs" />
+    <Compile Include="**\*.cs" Exclude="mcp-server\**\*.cs;obj\**\*.cs" />
   </ItemGroup>
 
   <ItemGroup>
@@ -57,6 +57,11 @@
     <Content Include="Resources\Icon.png">
       <IncludeInVSIX>true</IncludeInVSIX>
       <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </Content>
+    <Content Include="mcp-server\bin\$(Configuration)\XppMcpServer.exe">
+      <IncludeInVSIX>true</IncludeInVSIX>
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+      <Link>XppMcpServer.exe</Link>
     </Content>
   </ItemGroup>
 
@@ -88,6 +93,13 @@
   <Import Project="$(MSBuildToolsPath)\Microsoft.CSharp.targets" />
   <Import Project="$(VSToolsPath)\VSSDK\Microsoft.VsSDK.targets"
           Condition="'$(VSToolsPath)' != '' AND Exists('$(VSToolsPath)\VSSDK\Microsoft.VsSDK.targets')" />
+
+  <!-- Build the MCP server before the main project so its exe is available for VSIX packaging -->
+  <Target Name="BuildMcpServer" BeforeTargets="CoreCompile">
+    <MSBuild Projects="$(MSBuildProjectDirectory)\mcp-server\XppMcpServer.csproj"
+             Targets="Build"
+             Properties="Configuration=$(Configuration)" />
+  </Target>
 
   <!-- ============================================================
        Auto-version: stamp assembly + VSIX manifest from Version.props

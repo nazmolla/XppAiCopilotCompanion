@@ -33,14 +33,32 @@ namespace XppAiCopilotCompanion
 
             string typeStr = PromptDialog.Show(
                 "X++ Create Object",
-                "Object type (AxClass, AxTable, AxEdt, AxEnum, AxForm):",
+                "Object type:\n"
+                + "  Data: AxClass, AxTable, AxTableExtension, AxView, AxDataEntityView,\n"
+                + "        AxCompositeDataEntityView, AxMap, AxEdt, AxEdtExtension,\n"
+                + "        AxEnum, AxEnumExtension\n"
+                + "  UI:   AxForm, AxFormExtension, AxTile\n"
+                + "  Menu: AxMenu, AxMenuExtension, AxMenuItemDisplay,\n"
+                + "        AxMenuItemOutput, AxMenuItemAction\n"
+                + "  Query: AxQuery, AxQuerySimpleExtension\n"
+                + "  Security: AxSecurityPrivilege, AxSecurityDuty,\n"
+                + "           AxSecurityRole, AxSecurityPolicy\n"
+                + "  Services: AxService, AxServiceGroup\n"
+                + "  Workflow: AxWorkflowCategory, AxWorkflowType,\n"
+                + "           AxWorkflowApproval, AxWorkflowTask,\n"
+                + "           AxWorkflowAutomatedTask\n"
+                + "  Analytics: AxSsrsReport, AxAggregateMeasurement,\n"
+                + "           AxAggregateDimension, AxKpi\n"
+                + "  Config: AxConfigurationKey, AxConfigurationKeyGroup,\n"
+                + "          AxLicenseCode\n"
+                + "  Other: AxNumberSequenceModule, AxResource",
                 "AxClass");
             if (string.IsNullOrWhiteSpace(typeStr)) return;
 
             if (!Enum.TryParse<XppObjectType>(typeStr.Trim(), true, out var objectType))
             {
                 VsShellUtilities.ShowMessageBox(_package,
-                    "Invalid type. Use: AxClass, AxTable, AxEdt, AxEnum, AxForm",
+                    "Invalid type. Enter any D365FO AOT metadata type (e.g. AxClass, AxTable, AxForm, AxEdt, AxEnum, AxView, AxDataEntityView, AxSecurityDuty, AxService, AxWorkflowType, etc.)",
                     "X++ AI", OLEMSGICON.OLEMSGICON_WARNING,
                     OLEMSGBUTTON.OLEMSGBUTTON_OK, OLEMSGDEFBUTTON.OLEMSGDEFBUTTON_FIRST);
                 return;
@@ -70,7 +88,7 @@ namespace XppAiCopilotCompanion
             try
             {
                 string solutionDir = vs.GetActiveSolutionDirectory();
-                string targetDir = Path.Combine(solutionDir ?? ".", objectType.ToString());
+                string targetDir = solutionDir ?? ".";
 
                 var result = workflow.GenerateAndCreateObject(
                     userPrompt ?? string.Empty,

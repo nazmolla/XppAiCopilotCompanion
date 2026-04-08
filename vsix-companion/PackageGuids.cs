@@ -15,5 +15,7 @@ namespace XppAiCopilotCompanion
         public const int RefreshContext = 0x0100;
         public const int GenerateCode = 0x0101;
         public const int CreateObject = 0x0102;
+        public const int RegisterMcp = 0x0103;
+        public const int McpDiagnostics = 0x0104;
     }
 }
