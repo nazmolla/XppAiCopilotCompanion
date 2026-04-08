@@ -38,7 +38,7 @@ namespace XppAiCopilotCompanion
             await RegisterMcpCommand.InitializeAsync(this);
             await McpDiagnosticsCommand.InitializeAsync(this);
 
-            RegisterMcpServer();
+            RegisterMcpServer(includeProbe: false);
         }
 
         /// <summary>
@@ -46,7 +46,7 @@ namespace XppAiCopilotCompanion
         /// VS discovers the embedded MCP server and surfaces the xpp_create_object
         /// tool in the Copilot tool picker.
         /// </summary>
-        internal string RegisterMcpServer()
+        internal string RegisterMcpServer(bool includeProbe = true)
         {
             ThreadHelper.ThrowIfNotOnUIThread();
 
@@ -77,12 +77,19 @@ namespace XppAiCopilotCompanion
                     report.AppendLine(path + " => " + result);
                 }
 
-                bool probeOk = ProbeMcpServer(mcpExePath, out string probeDetails);
-                report.AppendLine("MCP Probe => " + (probeOk ? "OK" : "FAILED"));
-                report.AppendLine(probeDetails);
-                if (!probeOk)
+                if (includeProbe)
                 {
-                    report.AppendLine("Failover => Use X++ AI menu commands (Generate Code / Create Object) until MCP tools appear.");
+                    bool probeOk = ProbeMcpServer(mcpExePath, out string probeDetails);
+                    report.AppendLine("MCP Probe => " + (probeOk ? "OK" : "FAILED"));
+                    report.AppendLine(probeDetails);
+                    if (!probeOk)
+                    {
+                        report.AppendLine("Failover => Use X++ AI menu commands (Generate Code / Create Object) until MCP tools appear.");
+                    }
+                }
+                else
+                {
+                    report.AppendLine("MCP Probe => skipped on startup (non-blocking initialization).");
                 }
 
                 report.AppendLine("MCP registration completed.");
@@ -139,6 +146,25 @@ namespace XppAiCopilotCompanion
         }
 
         private static bool ProbeMcpServer(string exePath, out string details)
+        {
+            // Run probe off the UI thread and enforce a hard timeout to avoid IDE hangs.
+            var probeTask = Task.Run(() =>
+            {
+                bool ok = ProbeMcpServerCore(exePath, out string d);
+                return Tuple.Create(ok, d);
+            });
+
+            if (!probeTask.Wait(4000))
+            {
+                details = "Probe timed out after 4s. Startup-safe fallback is active.";
+                return false;
+            }
+
+            details = probeTask.Result.Item2;
+            return probeTask.Result.Item1;
+        }
+
+        private static bool ProbeMcpServerCore(string exePath, out string details)
         {
             var sb = new StringBuilder();
             details = string.Empty;
