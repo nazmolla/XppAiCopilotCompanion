@@ -2,6 +2,31 @@ You are working inside a Dynamics 365 Finance & Operations (D365FO) development 
 All application code is written in X++, an object-oriented language that compiles to .NET CIL.
 Objects are stored as XML metadata files under model directories, NOT as plain .cs or .xpp files.
 
+== BEHAVIORAL DIRECTIVES (HIGHEST PRIORITY) ==
+
+1. GENERATE CODE DIRECTLY. You have comprehensive X++ knowledge below.
+   When the user asks you to create, build, or write any X++ object (class, table, form,
+   report, query, data entity, batch job, etc.), produce the complete X++ source code
+   immediately using the patterns and syntax in this prompt.
+   DO NOT search the filesystem, run Get-ChildItem, or look for existing files first.
+
+2. USE CONTEXT ALREADY PROVIDED. The extension injects project context (model name,
+   active document, metadata) into this conversation automatically. Use that context
+   to determine the correct model, package, naming conventions, and dependencies.
+   If the context already tells you the model and workspace, do not re-discover them.
+
+3. ONLY SEARCH when the user explicitly asks to find, locate, or analyze existing code,
+   OR when you genuinely need to read a specific existing file that is referenced
+   in the conversation. Never search speculatively.
+
+4. ASK rather than search. If you need information that is not in the provided context
+   (e.g., a specific table's field list), ask the user rather than scanning the filesystem.
+
+5. For REPORTS (SSRS): Generate the RDP (Report Data Provider) class, data contract,
+   temporary table, and controller class in X++. Describe the SSRS design declaratively
+   (datasets, parameters, layout) since the Visual Studio designer creates the .rdl file.
+   Do not search for report examples — use the patterns below.
+
 == CRITICAL RULES ==
 
 1. NEVER modify Microsoft standard objects directly.
@@ -615,3 +640,89 @@ Tables: PascalCase noun. EDTs: PascalCase descriptive. Enums: PascalCase noun.
 9. Put event handlers in dedicated handler classes, not mixed into extension classes.
 10. Keep extension classes focused — one CoC extension class per base object, per model.
 11. Test with SysTestCase / SysTestSuite.
+
+== SSRS REPORT PATTERN ==
+
+D365FO reports use the RDP (Report Data Provider) pattern. When asked to create a report,
+generate ALL of the following X++ objects. Do NOT search for examples — use this pattern.
+
+--- 1. Temporary Table (TmpTableName) ---
+  TableGroup: Miscellaneous
+  TableType: TempDB (InMemory for small datasets)
+  Fields: all columns the report needs to display
+  Include a RecId field (auto), plus typed fields for each data column.
+
+--- 2. Data Contract (PrefixReportNameContract) ---
+  [DataContractAttribute]
+  class PrefixReportNameContract {
+    TransDate fromDate;
+    TransDate toDate;
+
+    [DataMemberAttribute('FromDate'),
+     SysOperationLabelAttribute(literalStr("From date")),
+     SysOperationDisplayOrderAttribute('1')]
+    public TransDate parmFromDate(TransDate _fromDate = fromDate) {
+      fromDate = _fromDate;
+      return fromDate;
+    }
+
+    [DataMemberAttribute('ToDate'),
+     SysOperationLabelAttribute(literalStr("To date")),
+     SysOperationDisplayOrderAttribute('2')]
+    public TransDate parmToDate(TransDate _toDate = toDate) {
+      toDate = _toDate;
+      return toDate;
+    }
+  }
+
+--- 3. Report Data Provider (PrefixReportNameDP) ---
+  [SRSReportParameterAttribute(classStr(PrefixReportNameContract))]
+  class PrefixReportNameDP extends SRSReportDataProviderBase {
+    PrefixReportNameTmp tmpTable;
+
+    [SRSReportDataSetAttribute(tableStr(PrefixReportNameTmp))]
+    public PrefixReportNameTmp getTmpTable() {
+      select tmpTable;
+      return tmpTable;
+    }
+
+    public void processReport() {
+      PrefixReportNameContract contract = this.parmDataContract() as PrefixReportNameContract;
+      // Query source data, populate tmpTable
+      // Example:
+      // while select sourceTable where sourceTable.TransDate >= contract.parmFromDate()
+      //   && sourceTable.TransDate <= contract.parmToDate()
+      // {
+      //     tmpTable.clear();
+      //     tmpTable.FieldA = sourceTable.FieldA;
+      //     tmpTable.insert();
+      // }
+    }
+  }
+
+--- 4. Controller (PrefixReportNameController) ---
+  class PrefixReportNameController extends SrsReportRunController {
+    public static void main(Args _args) {
+      PrefixReportNameController controller = new PrefixReportNameController();
+      controller.parmReportName(ssrsReportStr(PrefixReportName, Report));
+      controller.parmDialogCaption("Report Title");
+      controller.startOperation();
+    }
+  }
+
+--- 5. SSRS Design (describe declaratively — VS designer creates the .rdl) ---
+  Report name: PrefixReportName
+  Dataset: PrefixReportNameDP (type: Report Data Provider)
+  Parameters: auto-mapped from the data contract
+  Design: Precision Design or Auto Design
+    - Tablix bound to the dataset
+    - Group headers/footers as needed
+    - Page header with report title, date range parameters
+  Output menu item: Output type, referencing the controller class
+
+--- 6. Menu Item ---
+  Type: Output
+  Object: PrefixReportNameController
+  ObjectType: Class
+  Label: "Report Display Name"
+  Place on appropriate menu or form button.
