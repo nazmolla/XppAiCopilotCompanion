@@ -1,0 +1,47 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128" width="128" height="128">
+  <defs>
+    <linearGradient id="bg" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#1a1a2e"/>
+      <stop offset="100%" stop-color="#16213e"/>
+    </linearGradient>
+    <linearGradient id="accent" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#00d2ff"/>
+      <stop offset="100%" stop-color="#7b2ff7"/>
+    </linearGradient>
+    <linearGradient id="xGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#e0e0ff"/>
+      <stop offset="100%" stop-color="#ffffff"/>
+    </linearGradient>
+  </defs>
+
+  <!-- Rounded background -->
+  <rect x="2" y="2" width="124" height="124" rx="20" ry="20" fill="url(#bg)" stroke="url(#accent)" stroke-width="2.5"/>
+
+  <!-- Subtle circuit/node lines in background -->
+  <line x1="10" y1="30" x2="30" y2="30" stroke="#00d2ff" stroke-width="0.8" opacity="0.25"/>
+  <circle cx="30" cy="30" r="2" fill="#00d2ff" opacity="0.3"/>
+  <line x1="30" y1="30" x2="30" y2="15" stroke="#00d2ff" stroke-width="0.8" opacity="0.25"/>
+
+  <line x1="98" y1="100" x2="118" y2="100" stroke="#7b2ff7" stroke-width="0.8" opacity="0.25"/>
+  <circle cx="98" cy="100" r="2" fill="#7b2ff7" opacity="0.3"/>
+  <line x1="98" y1="100" x2="98" y2="115" stroke="#7b2ff7" stroke-width="0.8" opacity="0.25"/>
+
+  <line x1="100" y1="20" x2="115" y2="20" stroke="#00d2ff" stroke-width="0.8" opacity="0.2"/>
+  <circle cx="100" cy="20" r="1.5" fill="#00d2ff" opacity="0.25"/>
+
+  <line x1="15" y1="108" x2="28" y2="108" stroke="#7b2ff7" stroke-width="0.8" opacity="0.2"/>
+  <circle cx="28" cy="108" r="1.5" fill="#7b2ff7" opacity="0.25"/>
+
+  <!-- "X" character - bold, geometric -->
+  <text x="34" y="82" font-family="Consolas, 'Courier New', monospace" font-size="68" font-weight="bold" fill="url(#xGrad)" letter-spacing="-2">X</text>
+
+  <!-- "++" characters - accent colored -->
+  <text x="76" y="72" font-family="Consolas, 'Courier New', monospace" font-size="32" font-weight="bold" fill="url(#accent)">++</text>
+
+  <!-- Small "AI" badge bottom-right -->
+  <rect x="84" y="88" width="32" height="18" rx="5" ry="5" fill="url(#accent)" opacity="0.9"/>
+  <text x="100" y="101" font-family="Segoe UI, Arial, sans-serif" font-size="12" font-weight="bold" fill="#ffffff" text-anchor="middle">AI</text>
+
+  <!-- Subtle glow behind X -->
+  <circle cx="55" cy="65" r="30" fill="#00d2ff" opacity="0.06"/>
+</svg>

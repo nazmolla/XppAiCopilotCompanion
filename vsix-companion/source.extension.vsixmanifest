@@ -5,6 +5,7 @@
     <DisplayName>X++ AI Copilot Companion</DisplayName>
     <Description xml:space="preserve">Visual Studio UI-first companion extension that builds selective X++ AI context in-process and supports open-document edits and project file operations via Visual Studio APIs.</Description>
     <MoreInfo>https://github.com/nazmolla/XppAiCopilotCompanion</MoreInfo>
+    <Icon>Resources\Icon.png</Icon>
     <Tags>X++, D365FO, Dynamics 365, Copilot, AI, Finance and Operations</Tags>
   </Metadata>
   <Installation AllUsers="false" InstalledByMsi="false">

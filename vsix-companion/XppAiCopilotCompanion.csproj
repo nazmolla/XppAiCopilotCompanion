@@ -54,6 +54,13 @@
   </ItemGroup>
 
   <ItemGroup>
+    <Content Include="Resources\Icon.png">
+      <IncludeInVSIX>true</IncludeInVSIX>
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </Content>
+  </ItemGroup>
+
+  <ItemGroup>
     <None Include="source.extension.vsixmanifest" />
     <VSCTCompile Include="XppCopilotCommands.vsct">
       <ResourceName>Menus.ctmenu</ResourceName>
