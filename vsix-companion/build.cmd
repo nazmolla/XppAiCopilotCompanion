@@ -18,8 +18,8 @@ if "%CONFIG%"=="" set CONFIG=Debug
 :: Shift so %* contains only extra MSBuild args
 shift
 
-echo === Auto-versioning from git history ===
-powershell -NoProfile -ExecutionPolicy Bypass -File "%~dp0auto-version.ps1"
+echo === Auto-versioning (always bump patch) ===
+powershell -NoProfile -ExecutionPolicy Bypass -File "%~dp0auto-version.ps1" -AlwaysBumpPatch
 if errorlevel 1 (
     echo ERROR: auto-version.ps1 failed.
     exit /b 1
