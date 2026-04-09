@@ -7,6 +7,7 @@ using System.Runtime.InteropServices;
 using System.Threading;
 using EnvDTE;
 using Microsoft.VisualStudio.Shell;
+using XppAiCopilotCompanion.MetaModel;
 using Task = System.Threading.Tasks.Task;
 
 namespace XppAiCopilotCompanion
@@ -22,6 +23,8 @@ namespace XppAiCopilotCompanion
     public sealed class XppCopilotPackage : AsyncPackage
     {
         public static XppCopilotPackage Instance { get; private set; }
+        private System.Diagnostics.Process _mcpServerProcess;
+        private MetaModelBridgeServer _bridgeServer;
 
         protected override async Task InitializeAsync(
             CancellationToken cancellationToken,
@@ -39,6 +42,31 @@ namespace XppAiCopilotCompanion
             await McpDiagnosticsCommand.InitializeAsync(this);
 
             RegisterMcpServer(includeProbe: false);
+
+            // Start the MetaModel bridge HTTP server so the MCP server can
+            // delegate to real IMetaModelService APIs inside this VS process.
+            StartMetaModelBridge();
+
+            // Trigger a config refresh after VS startup settles so Copilot
+            // re-reads MCP configuration in sessions where discovery happens early.
+            _ = TouchMcpConfigsAfterDelayAsync();
+        }
+
+        private async Task TouchMcpConfigsAfterDelayAsync()
+        {
+            await Task.Delay(15000);
+            await JoinableTaskFactory.SwitchToMainThreadAsync();
+            try
+            {
+                foreach (string path in GetMcpConfigCandidatePaths())
+                {
+                    if (File.Exists(path))
+                    {
+                        File.SetLastWriteTimeUtc(path, DateTime.UtcNow);
+                    }
+                }
+            }
+            catch { }
         }
 
         /// <summary>
@@ -53,33 +81,153 @@ namespace XppAiCopilotCompanion
             var report = new StringBuilder();
             try
             {
+                string vsVersion = GetVisualStudioVersionText();
+                report.AppendLine("VS Version: " + vsVersion);
+                if (!IsMcpSupportedVsVersion(vsVersion))
+                {
+                    report.AppendLine("WARNING: This Visual Studio version is below 17.14.");
+                    report.AppendLine("External MCP tools may not appear in Copilot tool picker on this version.");
+                }
+
                 // Locate the MCP server exe shipped alongside the VSIX DLL
                 string extensionDir = Path.GetDirectoryName(
                     typeof(XppCopilotPackage).Assembly.Location);
-                string mcpExePath = Path.Combine(extensionDir, "XppMcpServer.exe");
+                string shippedExePath = Path.Combine(extensionDir, "XppMcpServer.exe");
 
                 report.AppendLine("ExtensionDir: " + extensionDir);
-                report.AppendLine("McpExePath: " + mcpExePath);
+                report.AppendLine("ShippedExePath: " + shippedExePath);
 
-                if (!File.Exists(mcpExePath))
+                if (!File.Exists(shippedExePath))
                 {
-                    string msg = "MCP server exe not found: " + mcpExePath;
+                    string msg = "MCP server exe not found: " + shippedExePath;
                     System.Diagnostics.Debug.WriteLine("[XppCopilot] " + msg);
                     report.AppendLine(msg);
                     return report.ToString();
                 }
 
-                string expectedJson = BuildMcpConfigJson(mcpExePath);
+                string defaultMcpUrl = "http://127.0.0.1:21329/";
+
+                // Fast alive-check: if a server is already running and has ALL expected tools, skip kill/copy/start.
+                // This prevents the circular-kill problem when something triggers a second registration.
+                bool serverAlreadyAlive = false;
+                try
+                {
+                    bool aliveOk = ProbeMcpHttp(defaultMcpUrl, out string aliveDetails);
+                    if (aliveOk)
+                    {
+                        serverAlreadyAlive = true;
+                        report.AppendLine("Existing MCP server on " + defaultMcpUrl + " is alive and current — skipping restart.");
+                        report.AppendLine(aliveDetails);
+                    }
+                    else
+                    {
+                        report.AppendLine("Existing server probe incomplete — will restart. " + aliveDetails);
+                    }
+                }
+                catch { }
+
+                string mcpUrl = defaultMcpUrl;
+
+                if (!serverAlreadyAlive)
+                {
+                    // MUST kill old processes BEFORE copying — the old exe is file-locked while running
+                    report.AppendLine("Killing stale MCP servers before copy...");
+                    try
+                    {
+                        // Graceful HTTP shutdown first
+                        try
+                        {
+                            using (var client = new System.Net.WebClient())
+                            {
+                                client.Encoding = Encoding.UTF8;
+                                client.Headers[System.Net.HttpRequestHeader.ContentType] = "application/json";
+                                client.UploadString("http://127.0.0.1:21329/",
+                                    "{\"jsonrpc\":\"2.0\",\"id\":99,\"method\":\"shutdown\",\"params\":{}}");
+                            }
+                            System.Threading.Thread.Sleep(500);
+                        }
+                        catch { }
+
+                        // Force kill all by name
+                        foreach (var p in System.Diagnostics.Process.GetProcessesByName("XppMcpServer"))
+                        {
+                            try
+                            {
+                                report.AppendLine("Pre-copy kill pid=" + p.Id);
+                                p.Kill();
+                                p.WaitForExit(2000);
+                            }
+                            catch { }
+                            finally { p.Dispose(); }
+                        }
+
+                        // Clean stale port/pid files
+                        string companionDir = Path.Combine(
+                            Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
+                            "XppCopilotCompanion");
+                        foreach (string f in new[] { "mcp-port.txt", "mcp-server.pid" })
+                        {
+                            string fp = Path.Combine(companionDir, f);
+                            if (File.Exists(fp)) try { File.Delete(fp); } catch { }
+                        }
+                    }
+                    catch (Exception killEx)
+                    {
+                        report.AppendLine("Pre-copy cleanup error: " + killEx.Message);
+                    }
+
+                    // NOW copy exe to stable path (old process is dead, file is unlocked)
+                    string stableDir = Path.Combine(
+                        Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
+                        "XppCopilotCompanion");
+                    Directory.CreateDirectory(stableDir);
+                    string mcpExePath = Path.Combine(stableDir, "XppMcpServer.exe");
+                    try
+                    {
+                        File.Copy(shippedExePath, mcpExePath, overwrite: true);
+                        report.AppendLine("StableExePath: " + mcpExePath + " => copied OK");
+                    }
+                    catch (Exception copyEx)
+                    {
+                        report.AppendLine("StableExePath: " + mcpExePath + " => copy failed: " + copyEx.Message
+                            + " — falling back to shipped exe");
+                        mcpExePath = shippedExePath;
+                    }
+
+                    // Start MCP server as HTTP (persistent background process)
+                    string startedUrl = StartMcpHttpServer(mcpExePath, out string startDetails);
+                    report.AppendLine(startDetails);
+
+                    if (string.IsNullOrWhiteSpace(startedUrl))
+                    {
+                        report.AppendLine("MCP HTTP server failed to start. Tools will not appear.");
+                        return report.ToString();
+                    }
+
+                    mcpUrl = startedUrl;
+                } // end if (!serverAlreadyAlive)
+
+                report.AppendLine("McpUrl: " + mcpUrl);
+
+                // Clean up old/corrupted configs from wrong locations
+                foreach (string stale in GetStaleMcpConfigPaths())
+                {
+                    string cleanResult = CleanStaleMcpConfig(stale);
+                    report.AppendLine(stale + " => " + cleanResult);
+                }
+
+                // Write .mcp.json pointing to HTTP URL
+                string expectedJson = BuildMcpConfigJson(mcpUrl);
 
                 foreach (string path in GetMcpConfigCandidatePaths())
                 {
-                    string result = UpsertMcpConfig(path, expectedJson, mcpExePath);
+                    string result = UpsertMcpConfig(path, expectedJson, null);
                     report.AppendLine(path + " => " + result);
                 }
 
                 if (includeProbe)
                 {
-                    bool probeOk = ProbeMcpServer(mcpExePath, out string probeDetails);
+                    bool probeOk = ProbeMcpHttp(mcpUrl, out string probeDetails);
                     report.AppendLine("MCP Probe => " + (probeOk ? "OK" : "FAILED"));
                     report.AppendLine(probeDetails);
                     if (!probeOk)
@@ -112,8 +260,12 @@ namespace XppAiCopilotCompanion
 
             try
             {
-                var dte = GetService(typeof(DTE)) as DTE;
-                report.AppendLine("VS Version: " + (dte?.Version ?? "(unknown)"));
+                string vsVersion = GetVisualStudioVersionText();
+                report.AppendLine("VS Version: " + vsVersion);
+                if (!IsMcpSupportedVsVersion(vsVersion))
+                {
+                    report.AppendLine("WARNING: VS version is below 17.14. External MCP tool surfacing may be unsupported.");
+                }
 
                 string extensionDir = Path.GetDirectoryName(typeof(XppCopilotPackage).Assembly.Location);
                 string mcpExePath = Path.Combine(extensionDir, "XppMcpServer.exe");
@@ -128,13 +280,36 @@ namespace XppAiCopilotCompanion
                     report.AppendLine("- " + path + " => " + (exists ? "exists" : "missing"));
                 }
 
-                if (File.Exists(mcpExePath))
+                // Probe the running HTTP server (don't launch a new process!)
+                string probeUrl = "http://127.0.0.1:21329/";
+                string portFile = Path.Combine(
+                    Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
+                    "XppCopilotCompanion", "mcp-port.txt");
+                if (File.Exists(portFile))
                 {
-                    bool probeOk = ProbeMcpServer(mcpExePath, out string probeDetails);
-                    report.AppendLine("MCP Probe => " + (probeOk ? "OK" : "FAILED"));
+                    string portText = File.ReadAllText(portFile).Trim();
+                    int port;
+                    if (int.TryParse(portText, out port) && port > 0)
+                        probeUrl = "http://127.0.0.1:" + port + "/";
+                }
+
+                {
+                    bool probeOk = ProbeMcpHttp(probeUrl, out string probeDetails);
+                    report.AppendLine("MCP HTTP Probe (" + probeUrl + ") => " + (probeOk ? "OK" : "FAILED"));
                     report.AppendLine(probeDetails);
                     if (!probeOk)
                         report.AppendLine("Failover => Use in-process X++ AI menu commands while troubleshooting MCP discovery.");
+                }
+
+                string mcpLogPath = Path.Combine(Path.GetTempPath(), "XppMcpServer.log");
+                report.AppendLine("MCP Log: " + mcpLogPath + " => " + (File.Exists(mcpLogPath) ? "exists" : "missing"));
+                if (File.Exists(mcpLogPath))
+                {
+                    report.AppendLine("MCP Log (tail):");
+                    foreach (string line in ReadLastLines(mcpLogPath, 20))
+                    {
+                        report.AppendLine("  " + line);
+                    }
                 }
             }
             catch (Exception ex)
@@ -145,141 +320,72 @@ namespace XppAiCopilotCompanion
             return report.ToString();
         }
 
-        private static bool ProbeMcpServer(string exePath, out string details)
+        private static bool IsMcpSupportedVsVersion(string versionText)
         {
-            // Run probe off the UI thread and enforce a hard timeout to avoid IDE hangs.
-            var probeTask = Task.Run(() =>
-            {
-                bool ok = ProbeMcpServerCore(exePath, out string d);
-                return Tuple.Create(ok, d);
-            });
+            if (string.IsNullOrWhiteSpace(versionText)) return false;
 
-            if (!probeTask.Wait(4000))
-            {
-                details = "Probe timed out after 4s. Startup-safe fallback is active.";
+            // ProductVersion can include extra suffixes; parse the leading numeric token only.
+            string numeric = ExtractLeadingVersion(versionText);
+            if (string.IsNullOrWhiteSpace(numeric)) return false;
+
+            Version parsed;
+            if (!Version.TryParse(numeric, out parsed))
                 return false;
-            }
 
-            details = probeTask.Result.Item2;
-            return probeTask.Result.Item1;
+            // MCP tool surfacing in VS Copilot is expected on 17.14+
+            var min = new Version(17, 14);
+            return parsed >= min;
         }
 
-        private static bool ProbeMcpServerCore(string exePath, out string details)
+        private string GetVisualStudioVersionText()
         {
-            var sb = new StringBuilder();
-            details = string.Empty;
+            ThreadHelper.ThrowIfNotOnUIThread();
 
             try
             {
-                var psi = new ProcessStartInfo
-                {
-                    FileName = exePath,
-                    UseShellExecute = false,
-                    RedirectStandardInput = true,
-                    RedirectStandardOutput = true,
-                    RedirectStandardError = true,
-                    CreateNoWindow = true
-                };
-
-                using (var proc = System.Diagnostics.Process.Start(psi))
-                {
-                    if (proc == null)
-                    {
-                        details = "Failed to start MCP server process.";
-                        return false;
-                    }
-
-                    string init = "{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"initialize\",\"params\":{\"protocolVersion\":\"2024-11-05\",\"capabilities\":{},\"clientInfo\":{\"name\":\"xpp-copilot-companion\",\"version\":\"0.2.1\"}}}";
-                    WriteFramedMessage(proc.StandardInput, init);
-                    string initResp = ReadFramedMessage(proc.StandardOutput, 3000);
-                    bool initOk = !string.IsNullOrWhiteSpace(initResp) && initResp.Contains("\"result\"");
-                    sb.AppendLine("Initialize: " + (initOk ? "OK" : "FAILED"));
-
-                    string list = "{\"jsonrpc\":\"2.0\",\"id\":2,\"method\":\"tools/list\",\"params\":{}}";
-                    WriteFramedMessage(proc.StandardInput, list);
-                    string listResp = ReadFramedMessage(proc.StandardOutput, 3000);
-                    bool listOk = !string.IsNullOrWhiteSpace(listResp) && listResp.Contains("xpp_create_object");
-                    sb.AppendLine("ToolsList: " + (listOk ? "OK" : "FAILED"));
-
-                    try
-                    {
-                        string shutdown = "{\"jsonrpc\":\"2.0\",\"id\":3,\"method\":\"shutdown\",\"params\":{}}";
-                        WriteFramedMessage(proc.StandardInput, shutdown);
-                    }
-                    catch
-                    {
-                    }
-
-                    if (!proc.HasExited)
-                    {
-                        if (!proc.WaitForExit(500)) proc.Kill();
-                    }
-
-                    details = sb.ToString();
-                    return initOk && listOk;
-                }
+                string product = System.Diagnostics.Process.GetCurrentProcess().MainModule?.FileVersionInfo?.ProductVersion;
+                if (!string.IsNullOrWhiteSpace(product))
+                    return product;
             }
-            catch (Exception ex)
+            catch
             {
-                details = "Probe exception: " + ex.Message;
-                return false;
             }
+
+            try
+            {
+                var dte = GetService(typeof(DTE)) as DTE;
+                if (!string.IsNullOrWhiteSpace(dte?.Version))
+                    return dte.Version;
+            }
+            catch
+            {
+            }
+
+            return "0.0";
         }
 
-        private static void WriteFramedMessage(StreamWriter writer, string json)
+        private static string ExtractLeadingVersion(string text)
         {
-            byte[] bytes = Encoding.UTF8.GetBytes(json);
-            writer.Write("Content-Length: " + bytes.Length + "\r\n\r\n");
-            writer.Write(json);
-            writer.Flush();
-        }
+            if (string.IsNullOrWhiteSpace(text)) return null;
 
-        private static string ReadFramedMessage(StreamReader reader, int timeoutMs)
-        {
-            var sw = Stopwatch.StartNew();
-            int contentLength = -1;
-
-            while (sw.ElapsedMilliseconds < timeoutMs)
-            {
-                string line = reader.ReadLine();
-                if (line == null) break;
-                if (line.Length == 0) break;
-                if (line.StartsWith("Content-Length:", StringComparison.OrdinalIgnoreCase))
-                {
-                    string value = line.Substring("Content-Length:".Length).Trim();
-                    int.TryParse(value, out contentLength);
-                }
-            }
-
-            if (contentLength <= 0) return null;
-
-            char[] buffer = new char[contentLength];
-            int total = 0;
-            while (total < contentLength && sw.ElapsedMilliseconds < timeoutMs)
-            {
-                int read = reader.Read(buffer, total, contentLength - total);
-                if (read <= 0) break;
-                total += read;
-            }
-
-            return total > 0 ? new string(buffer, 0, total) : null;
+            int i = 0;
+            while (i < text.Length && (char.IsDigit(text[i]) || text[i] == '.')) i++;
+            string token = text.Substring(0, i).Trim('.');
+            return string.IsNullOrWhiteSpace(token) ? null : token;
         }
 
         private IEnumerable<string> GetMcpConfigCandidatePaths()
         {
+            // Official VS MCP discovery locations per:
+            // https://learn.microsoft.com/en-us/visualstudio/ide/mcp-servers
             var result = new List<string>();
             string userHome = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
 
-            // Visual Studio and generic MCP discovery candidates
+            // 1. %USERPROFILE%\.mcp.json — global, all solutions
             result.Add(Path.Combine(userHome, ".mcp.json"));
+            // 2. %USERPROFILE%\mcp.json — compatibility variant used in some setups
             result.Add(Path.Combine(userHome, "mcp.json"));
 
-            // Compatibility with VS Code-style conventions (some Copilot builds look here)
-            string vscodeDir = Path.Combine(userHome, ".vscode");
-            result.Add(Path.Combine(vscodeDir, "mcp.json"));
-            result.Add(Path.Combine(vscodeDir, ".mcp.json"));
-
-            // Solution-local discovery for VS scenarios that prioritize solution scope
             ThreadHelper.ThrowIfNotOnUIThread();
             var dte = GetService(typeof(DTE)) as DTE;
             string slnPath = dte?.Solution?.FullName;
@@ -287,13 +393,65 @@ namespace XppAiCopilotCompanion
             {
                 string slnDir = Path.GetDirectoryName(slnPath);
                 if (!string.IsNullOrWhiteSpace(slnDir))
+                {
+                    // 3. <SOLUTIONDIR>\.vs\mcp.json — per-user, per-solution
+                    string vsDir = Path.Combine(slnDir, ".vs");
+                    result.Add(Path.Combine(vsDir, "mcp.json"));
+                    // 4. <SOLUTIONDIR>\.vs\.mcp.json — compatibility variant
+                    result.Add(Path.Combine(vsDir, ".mcp.json"));
+
+                    // 5. <SOLUTIONDIR>\.mcp.json — solution-level, source-controllable
                     result.Add(Path.Combine(slnDir, ".mcp.json"));
+                    // 6. <SOLUTIONDIR>\mcp.json — compatibility variant
+                    result.Add(Path.Combine(slnDir, "mcp.json"));
+
+                    // 7. <SOLUTIONDIR>\.vscode\mcp.json — shared with VS Code ecosystem
+                    result.Add(Path.Combine(slnDir, ".vscode", "mcp.json"));
+                    // 8. <SOLUTIONDIR>\.cursor\mcp.json — shared with Cursor ecosystem
+                    result.Add(Path.Combine(slnDir, ".cursor", "mcp.json"));
+                }
             }
 
             return result;
         }
 
-        private static string UpsertMcpConfig(string configPath, string expectedJson, string mcpExePath)
+        /// <summary>
+        /// Paths where previous versions incorrectly wrote MCP configs.
+        /// These are not valid VS discovery locations and must be removed.
+        /// </summary>
+        private static IEnumerable<string> GetStaleMcpConfigPaths()
+        {
+            string userHome = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
+            return new[]
+            {
+                Path.Combine(userHome, ".vscode", "mcp.json"),
+                Path.Combine(userHome, ".vscode", ".mcp.json"),
+            };
+        }
+
+        private static string CleanStaleMcpConfig(string path)
+        {
+            try
+            {
+                if (!File.Exists(path))
+                    return "not present";
+
+                string content = File.ReadAllText(path);
+                if (content.Contains("xpp-copilot-companion"))
+                {
+                    File.Delete(path);
+                    return "removed (was ours)";
+                }
+
+                return "skipped (not ours)";
+            }
+            catch (Exception ex)
+            {
+                return "cleanup failed: " + ex.Message;
+            }
+        }
+
+        private static string UpsertMcpConfig(string configPath, string expectedJson, object _unused)
         {
             try
             {
@@ -301,16 +459,10 @@ namespace XppAiCopilotCompanion
                 if (!string.IsNullOrWhiteSpace(dir))
                     Directory.CreateDirectory(dir);
 
-                if (File.Exists(configPath))
-                {
-                    string existing = File.ReadAllText(configPath);
-                    if (existing.Contains("xpp-copilot-companion") && existing.Contains(mcpExePath.Replace("\\", "\\\\")))
-                        return "already up-to-date";
-                }
-
+                // Always overwrite to fix stale/corrupted configs.
                 File.WriteAllText(configPath, expectedJson);
                 System.Diagnostics.Debug.WriteLine("[XppCopilot] MCP server registered: " + configPath);
-                return "updated";
+                return "written";
             }
             catch (Exception ex)
             {
@@ -319,25 +471,181 @@ namespace XppAiCopilotCompanion
             }
         }
 
-        private static string BuildMcpConfigJson(string exePath)
+        private static string BuildMcpConfigJson(string mcpUrl)
         {
-            string escapedPath = exePath.Replace("\\", "\\\\");
+            // Official VS .mcp.json schema — HTTP transport uses "url" field.
+            // https://learn.microsoft.com/en-us/visualstudio/ide/mcp-servers
             return "{\n"
                 + "  \"servers\": {\n"
                 + "    \"xpp-copilot-companion\": {\n"
-                + "      \"type\": \"stdio\",\n"
-                + "      \"command\": \"" + escapedPath + "\",\n"
-                + "      \"args\": []\n"
-                + "    }\n"
-                + "  },\n"
-                + "  \"mcpServers\": {\n"
-                + "    \"xpp-copilot-companion\": {\n"
-                + "      \"type\": \"stdio\",\n"
-                + "      \"command\": \"" + escapedPath + "\",\n"
-                + "      \"args\": []\n"
+                + "      \"type\": \"http\",\n"
+                + "      \"transport\": \"http\",\n"
+                + "      \"url\": \"" + mcpUrl + "\"\n"
                 + "    }\n"
                 + "  }\n"
                 + "}\n";
+        }
+
+        private string StartMcpHttpServer(string exePath, out string details)
+        {
+            var sb = new StringBuilder();
+            try
+            {
+                // Old processes were already killed in RegisterMcpServer before the exe copy.
+                // Just start the new server.
+
+                var psi = new ProcessStartInfo
+                {
+                    FileName = exePath,
+                    UseShellExecute = false,
+                    CreateNoWindow = true,
+                    RedirectStandardError = true,
+                };
+
+                var proc = System.Diagnostics.Process.Start(psi);
+                if (proc == null)
+                {
+                    details = sb.ToString() + "Failed to start MCP HTTP server process.";
+                    return null;
+                }
+
+                _mcpServerProcess = proc;
+                sb.AppendLine("Started MCP HTTP server pid=" + proc.Id);
+
+                // Write PID file so we can clean up orphans even after a VS crash
+                try
+                {
+                    string pidFile = Path.Combine(
+                        Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
+                        "XppCopilotCompanion", "mcp-server.pid");
+                    File.WriteAllText(pidFile, proc.Id.ToString());
+                }
+                catch { }
+
+                // Wait for port file to appear (server writes it on startup)
+                string portFile = Path.Combine(
+                    Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
+                    "XppCopilotCompanion", "mcp-port.txt");
+
+                int port = 0;
+                for (int i = 0; i < 30; i++) // up to 3 seconds
+                {
+                    System.Threading.Thread.Sleep(100);
+                    if (File.Exists(portFile))
+                    {
+                        string portText = File.ReadAllText(portFile).Trim();
+                        if (int.TryParse(portText, out port) && port > 0)
+                            break;
+                    }
+                }
+
+                if (port <= 0)
+                {
+                    details = sb.ToString() + "Port file not found after 3s.";
+                    return null;
+                }
+
+                string url = "http://127.0.0.1:" + port + "/";
+                sb.AppendLine("MCP HTTP URL: " + url);
+                details = sb.ToString();
+                return url;
+            }
+            catch (Exception ex)
+            {
+                details = sb.ToString() + "Exception: " + ex.Message;
+                return null;
+            }
+        }
+
+        private static bool ProbeMcpHttp(string url, out string details)
+        {
+            var sb = new StringBuilder();
+            try
+            {
+                using (var client = new System.Net.WebClient())
+                {
+                    client.Encoding = Encoding.UTF8;
+                    client.Headers[System.Net.HttpRequestHeader.ContentType] = "application/json";
+
+                    string initJson = "{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"initialize\",\"params\":{\"protocolVersion\":\"2024-11-05\",\"capabilities\":{},\"clientInfo\":{\"name\":\"xpp-copilot-probe\",\"version\":\"0.3.0\"}}}";
+                    string initResp = client.UploadString(url, initJson);
+                    bool initOk = !string.IsNullOrWhiteSpace(initResp) && initResp.Contains("\"result\"");
+                    sb.AppendLine("Initialize: " + (initOk ? "OK" : "FAILED"));
+
+                    string listJson = "{\"jsonrpc\":\"2.0\",\"id\":2,\"method\":\"tools/list\",\"params\":{}}";
+                    string listResp = client.UploadString(url, listJson);
+                    bool listOk = !string.IsNullOrWhiteSpace(listResp) && listResp.Contains("xpp_create_object");
+                    bool hasAllTools = listOk && listResp.Contains("xpp_search_docs");
+                    sb.AppendLine("ToolsList: " + (listOk ? "OK" : "FAILED")
+                        + (listOk && !hasAllTools ? " (missing xpp_search_docs — outdated server)" : ""));
+
+                    details = sb.ToString();
+                    return initOk && hasAllTools;
+                }
+            }
+            catch (Exception ex)
+            {
+                details = sb.ToString() + "Probe exception: " + ex.Message;
+                return false;
+            }
+        }
+
+        private static IEnumerable<string> ReadLastLines(string path, int maxLines)
+        {
+            try
+            {
+                var queue = new Queue<string>(maxLines);
+                foreach (string line in File.ReadLines(path))
+                {
+                    if (queue.Count == maxLines)
+                        queue.Dequeue();
+                    queue.Enqueue(line);
+                }
+                return queue;
+            }
+            catch
+            {
+                return new[] { "<unable to read log file>" };
+            }
+        }
+
+        private void StartMetaModelBridge()
+        {
+            try
+            {
+                var bridge = new MetaModelBridge();
+                _bridgeServer = new MetaModelBridgeServer(bridge);
+                _bridgeServer.Start();
+                System.Diagnostics.Debug.WriteLine("[XppCopilot] MetaModel bridge started.");
+            }
+            catch (Exception ex)
+            {
+                System.Diagnostics.Debug.WriteLine("[XppCopilot] MetaModel bridge failed: " + ex.Message);
+            }
+        }
+
+        protected override void Dispose(bool disposing)
+        {
+            if (disposing)
+            {
+                // Shut down the MetaModel bridge server.
+                if (_bridgeServer != null)
+                {
+                    try { _bridgeServer.Dispose(); } catch { }
+                    _bridgeServer = null;
+                }
+
+                // Do NOT kill the MCP server or delete the companion folder.
+                // The server must persist between VS sessions so that VS reads
+                // .mcp.json on next startup and connects to the already-running
+                // server BEFORE the extension loads — solving the discovery timing issue.
+                if (_mcpServerProcess != null)
+                {
+                    try { _mcpServerProcess.Dispose(); } catch { }
+                    _mcpServerProcess = null;
+                }
+            }
+            base.Dispose(disposing);
         }
     }
 }

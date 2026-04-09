@@ -20,4 +20,11 @@ ehthumbs.db
 Desktop.ini
 .DS_Store
 
+# VS Code workspace
 .vscode/
+
+# D365FO SDK DLLs (extracted from MS VSIX, not redistributable)
+vsix-companion/Samples/
+
+# Temporary scan artifacts
+dll-scan-results.txt
