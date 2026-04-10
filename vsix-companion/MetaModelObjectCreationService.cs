@@ -34,7 +34,6 @@ namespace XppAiCopilotCompanion
                 ObjectName = request.ObjectName.Trim(),
                 Declaration = request.SuggestedCode,
                 Methods = request.Methods,
-                MetadataXml = request.MetadataXml,
                 ModelName = null // bridge will use active project's model
             };
 

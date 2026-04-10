@@ -165,8 +165,14 @@ namespace XppAiCopilotCompanion.MetaModel
                 ObjectName = ExtractJsonString(body, "objectName"),
                 Declaration = ExtractJsonString(body, "declaration"),
                 Methods = ExtractJsonStringArray(body, "methods"),
-                MetadataXml = ExtractJsonString(body, "metadataXml"),
-                ModelName = ExtractJsonString(body, "modelName")
+                ModelName = ExtractJsonString(body, "modelName"),
+                Properties = ExtractJsonObject(body, "properties"),
+                EnumValues = ParseEnumValues(body),
+                Fields = ParseFields(body),
+                Indexes = ParseIndexes(body),
+                FieldGroups = ParseFieldGroups(body),
+                Relations = ParseRelations(body),
+                EntryPoints = ParseEntryPoints(body)
             };
             var result = _bridge.CreateObject(req);
             return SerializeResult(result);
@@ -196,7 +202,13 @@ namespace XppAiCopilotCompanion.MetaModel
                 Declaration = ExtractJsonString(body, "declaration"),
                 Methods = ExtractJsonStringArray(body, "methods"),
                 RemoveMethodNames = ExtractJsonStringArray(body, "removeMethodNames"),
-                MetadataXml = ExtractJsonString(body, "metadataXml")
+                Properties = ExtractJsonObject(body, "properties"),
+                EnumValues = ParseEnumValues(body),
+                Fields = ParseFields(body),
+                Indexes = ParseIndexes(body),
+                FieldGroups = ParseFieldGroups(body),
+                Relations = ParseRelations(body),
+                EntryPoints = ParseEntryPoints(body)
             };
             var result = _bridge.UpdateObject(req);
             return SerializeResult(result);
@@ -408,9 +420,10 @@ namespace XppAiCopilotCompanion.MetaModel
             if (r.ObjectType != null) sb.Append(",\"objectType\":\"" + EscapeJson(r.ObjectType) + "\"");
             if (r.ObjectName != null) sb.Append(",\"objectName\":\"" + EscapeJson(r.ObjectName) + "\"");
             if (r.Declaration != null) sb.Append(",\"declaration\":\"" + EscapeJson(r.Declaration) + "\"");
-            if (r.MetadataXml != null) sb.Append(",\"metadataXml\":\"" + EscapeJson(r.MetadataXml) + "\"");
             if (r.ModelName != null) sb.Append(",\"modelName\":\"" + EscapeJson(r.ModelName) + "\"");
             sb.Append(",\"isCustom\":" + (r.IsCustom ? "true" : "false"));
+
+            // Methods
             sb.Append(",\"methods\":[");
             for (int i = 0; i < r.Methods.Count; i++)
             {
@@ -418,8 +431,436 @@ namespace XppAiCopilotCompanion.MetaModel
                 sb.Append("{\"name\":\"" + EscapeJson(r.Methods[i].Name) + "\"");
                 sb.Append(",\"source\":\"" + EscapeJson(r.Methods[i].Source) + "\"}");
             }
-            sb.Append("]}");
+            sb.Append("]");
+
+            // Properties
+            if (r.Properties != null && r.Properties.Count > 0)
+            {
+                sb.Append(",\"properties\":{");
+                bool first = true;
+                foreach (var kvp in r.Properties)
+                {
+                    if (!first) sb.Append(",");
+                    sb.Append("\"" + EscapeJson(kvp.Key) + "\":\"" + EscapeJson(kvp.Value ?? "") + "\"");
+                    first = false;
+                }
+                sb.Append("}");
+            }
+
+            // EnumValues
+            SerializeEnumValues(sb, r.EnumValues);
+            // Fields
+            SerializeFields(sb, r.Fields);
+            // Indexes
+            SerializeIndexes(sb, r.Indexes);
+            // FieldGroups
+            SerializeFieldGroups(sb, r.FieldGroups);
+            // Relations
+            SerializeRelations(sb, r.Relations);
+            // EntryPoints
+            SerializeEntryPoints(sb, r.EntryPoints);
+
+            sb.Append("}");
             return sb.ToString();
+        }
+
+        private static void SerializeEnumValues(StringBuilder sb, System.Collections.Generic.List<EnumValueDto> values)
+        {
+            if (values == null || values.Count == 0) return;
+            sb.Append(",\"enumValues\":[");
+            for (int i = 0; i < values.Count; i++)
+            {
+                if (i > 0) sb.Append(",");
+                var v = values[i];
+                sb.Append("{\"name\":\"" + EscapeJson(v.Name) + "\",\"value\":" + v.Value);
+                if (!string.IsNullOrEmpty(v.Label))
+                    sb.Append(",\"label\":\"" + EscapeJson(v.Label) + "\"");
+                sb.Append("}");
+            }
+            sb.Append("]");
+        }
+
+        private static void SerializeFields(StringBuilder sb, System.Collections.Generic.List<FieldDto> fields)
+        {
+            if (fields == null || fields.Count == 0) return;
+            sb.Append(",\"fields\":[");
+            for (int i = 0; i < fields.Count; i++)
+            {
+                if (i > 0) sb.Append(",");
+                var f = fields[i];
+                sb.Append("{\"name\":\"" + EscapeJson(f.Name) + "\",\"fieldType\":\"" + EscapeJson(f.FieldType ?? "String") + "\"");
+                if (!string.IsNullOrEmpty(f.ExtendedDataType))
+                    sb.Append(",\"extendedDataType\":\"" + EscapeJson(f.ExtendedDataType) + "\"");
+                if (!string.IsNullOrEmpty(f.EnumType))
+                    sb.Append(",\"enumType\":\"" + EscapeJson(f.EnumType) + "\"");
+                if (!string.IsNullOrEmpty(f.Label))
+                    sb.Append(",\"label\":\"" + EscapeJson(f.Label) + "\"");
+                sb.Append("}");
+            }
+            sb.Append("]");
+        }
+
+        private static void SerializeIndexes(StringBuilder sb, System.Collections.Generic.List<IndexDto> indexes)
+        {
+            if (indexes == null || indexes.Count == 0) return;
+            sb.Append(",\"indexes\":[");
+            for (int i = 0; i < indexes.Count; i++)
+            {
+                if (i > 0) sb.Append(",");
+                var idx = indexes[i];
+                sb.Append("{\"name\":\"" + EscapeJson(idx.Name) + "\",\"allowDuplicates\":" + (idx.AllowDuplicates ? "true" : "false"));
+                sb.Append(",\"fields\":[");
+                for (int j = 0; j < idx.Fields.Count; j++)
+                {
+                    if (j > 0) sb.Append(",");
+                    sb.Append("\"" + EscapeJson(idx.Fields[j]) + "\"");
+                }
+                sb.Append("]}");
+            }
+            sb.Append("]");
+        }
+
+        private static void SerializeFieldGroups(StringBuilder sb, System.Collections.Generic.List<FieldGroupDto> groups)
+        {
+            if (groups == null || groups.Count == 0) return;
+            sb.Append(",\"fieldGroups\":[");
+            for (int i = 0; i < groups.Count; i++)
+            {
+                if (i > 0) sb.Append(",");
+                var fg = groups[i];
+                sb.Append("{\"name\":\"" + EscapeJson(fg.Name) + "\"");
+                if (!string.IsNullOrEmpty(fg.Label))
+                    sb.Append(",\"label\":\"" + EscapeJson(fg.Label) + "\"");
+                sb.Append(",\"fields\":[");
+                for (int j = 0; j < fg.Fields.Count; j++)
+                {
+                    if (j > 0) sb.Append(",");
+                    sb.Append("\"" + EscapeJson(fg.Fields[j]) + "\"");
+                }
+                sb.Append("]}");
+            }
+            sb.Append("]");
+        }
+
+        private static void SerializeRelations(StringBuilder sb, System.Collections.Generic.List<RelationDto> relations)
+        {
+            if (relations == null || relations.Count == 0) return;
+            sb.Append(",\"relations\":[");
+            for (int i = 0; i < relations.Count; i++)
+            {
+                if (i > 0) sb.Append(",");
+                var rel = relations[i];
+                sb.Append("{\"name\":\"" + EscapeJson(rel.Name) + "\",\"relatedTable\":\"" + EscapeJson(rel.RelatedTable ?? "") + "\"");
+                if (rel.Constraints != null && rel.Constraints.Count > 0)
+                {
+                    sb.Append(",\"constraints\":[");
+                    for (int j = 0; j < rel.Constraints.Count; j++)
+                    {
+                        if (j > 0) sb.Append(",");
+                        var c = rel.Constraints[j];
+                        sb.Append("{\"field\":\"" + EscapeJson(c.Field ?? "") + "\",\"relatedField\":\"" + EscapeJson(c.RelatedField ?? "") + "\"}");
+                    }
+                    sb.Append("]");
+                }
+                sb.Append("}");
+            }
+            sb.Append("]");
+        }
+
+        private static void SerializeEntryPoints(StringBuilder sb, System.Collections.Generic.List<EntryPointDto> entryPoints)
+        {
+            if (entryPoints == null || entryPoints.Count == 0) return;
+            sb.Append(",\"entryPoints\":[");
+            for (int i = 0; i < entryPoints.Count; i++)
+            {
+                if (i > 0) sb.Append(",");
+                var ep = entryPoints[i];
+                sb.Append("{\"name\":\"" + EscapeJson(ep.Name) + "\"");
+                if (!string.IsNullOrEmpty(ep.ObjectType))
+                    sb.Append(",\"objectType\":\"" + EscapeJson(ep.ObjectType) + "\"");
+                if (!string.IsNullOrEmpty(ep.ObjectName))
+                    sb.Append(",\"objectName\":\"" + EscapeJson(ep.ObjectName) + "\"");
+                if (!string.IsNullOrEmpty(ep.Grant))
+                    sb.Append(",\"grant\":\"" + EscapeJson(ep.Grant) + "\"");
+                sb.Append("}");
+            }
+            sb.Append("]");
+        }
+
+        // ── Typed metadata parsing helpers ──
+
+        private static System.Collections.Generic.Dictionary<string, string> ExtractJsonObject(string json, string key)
+        {
+            if (json == null) return null;
+            string marker = "\"" + key + "\"";
+            int idx = json.IndexOf(marker, StringComparison.Ordinal);
+            if (idx < 0) return null;
+            int colon = json.IndexOf(':', idx + marker.Length);
+            if (colon < 0) return null;
+            int braceStart = json.IndexOf('{', colon);
+            if (braceStart < 0) return null;
+
+            // Find matching closing brace
+            int depth = 0;
+            bool inStr = false; bool esc = false; int braceEnd = -1;
+            for (int i = braceStart; i < json.Length; i++)
+            {
+                char c = json[i];
+                if (esc) { esc = false; continue; }
+                if (c == '\\') { esc = true; continue; }
+                if (c == '"') { inStr = !inStr; continue; }
+                if (inStr) continue;
+                if (c == '{') depth++;
+                if (c == '}') { depth--; if (depth == 0) { braceEnd = i; break; } }
+            }
+            if (braceEnd < 0) return null;
+
+            string content = json.Substring(braceStart, braceEnd - braceStart + 1);
+            var dict = new System.Collections.Generic.Dictionary<string, string>();
+
+            // Parse key-value pairs from flat object
+            int pos = 1; // skip opening brace
+            while (pos < content.Length - 1)
+            {
+                string k = ReadJsonString(content, ref pos);
+                if (k == null) break;
+                SkipWhitespace(content, ref pos);
+                if (pos < content.Length && content[pos] == ':') pos++;
+                SkipWhitespace(content, ref pos);
+                string v = ReadJsonString(content, ref pos);
+                if (v != null) dict[k] = v;
+                SkipWhitespace(content, ref pos);
+                if (pos < content.Length && content[pos] == ',') pos++;
+            }
+            return dict.Count > 0 ? dict : null;
+        }
+
+        private static string ExtractJsonArray(string json, string key)
+        {
+            if (json == null) return null;
+            string marker = "\"" + key + "\"";
+            int idx = json.IndexOf(marker, StringComparison.Ordinal);
+            if (idx < 0) return null;
+            int colon = json.IndexOf(':', idx + marker.Length);
+            if (colon < 0) return null;
+            int bracketStart = json.IndexOf('[', colon);
+            if (bracketStart < 0) return null;
+
+            int depth = 0; bool inStr = false; bool esc = false; int bracketEnd = -1;
+            for (int i = bracketStart; i < json.Length; i++)
+            {
+                char c = json[i];
+                if (esc) { esc = false; continue; }
+                if (c == '\\') { esc = true; continue; }
+                if (c == '"') { inStr = !inStr; continue; }
+                if (inStr) continue;
+                if (c == '[') depth++;
+                if (c == ']') { depth--; if (depth == 0) { bracketEnd = i; break; } }
+            }
+            if (bracketEnd < 0) return null;
+            return json.Substring(bracketStart, bracketEnd - bracketStart + 1);
+        }
+
+        private static System.Collections.Generic.List<string> SplitJsonObjects(string arrayJson)
+        {
+            var objects = new System.Collections.Generic.List<string>();
+            if (string.IsNullOrEmpty(arrayJson) || arrayJson.Length < 2) return objects;
+            string content = arrayJson.Substring(1, arrayJson.Length - 2); // strip [ ]
+
+            int pos = 0;
+            while (pos < content.Length)
+            {
+                int objStart = content.IndexOf('{', pos);
+                if (objStart < 0) break;
+                int depth = 0; bool inStr = false; bool esc = false; int objEnd = -1;
+                for (int i = objStart; i < content.Length; i++)
+                {
+                    char c = content[i];
+                    if (esc) { esc = false; continue; }
+                    if (c == '\\') { esc = true; continue; }
+                    if (c == '"') { inStr = !inStr; continue; }
+                    if (inStr) continue;
+                    if (c == '{') depth++;
+                    if (c == '}') { depth--; if (depth == 0) { objEnd = i; break; } }
+                }
+                if (objEnd < 0) break;
+                objects.Add(content.Substring(objStart, objEnd - objStart + 1));
+                pos = objEnd + 1;
+            }
+            return objects;
+        }
+
+        private static string ReadJsonString(string json, ref int pos)
+        {
+            SkipWhitespace(json, ref pos);
+            if (pos >= json.Length || json[pos] != '"') return null;
+            var sb = new StringBuilder();
+            pos++; // skip opening quote
+            while (pos < json.Length)
+            {
+                char c = json[pos];
+                if (c == '\\' && pos + 1 < json.Length)
+                {
+                    char next = json[pos + 1];
+                    switch (next)
+                    {
+                        case '"': sb.Append('"'); break;
+                        case '\\': sb.Append('\\'); break;
+                        case 'n': sb.Append('\n'); break;
+                        case 'r': sb.Append('\r'); break;
+                        case 't': sb.Append('\t'); break;
+                        default: sb.Append(next); break;
+                    }
+                    pos += 2; continue;
+                }
+                if (c == '"') { pos++; return sb.ToString(); }
+                sb.Append(c); pos++;
+            }
+            return sb.ToString();
+        }
+
+        private static string ReadJsonValue(string json, ref int pos)
+        {
+            SkipWhitespace(json, ref pos);
+            if (pos >= json.Length) return null;
+            if (json[pos] == '"') return ReadJsonString(json, ref pos);
+            // Read number, bool, or null token
+            int start = pos;
+            while (pos < json.Length && json[pos] != ',' && json[pos] != '}' && json[pos] != ']' && !char.IsWhiteSpace(json[pos]))
+                pos++;
+            return json.Substring(start, pos - start);
+        }
+
+        private static void SkipWhitespace(string s, ref int pos)
+        {
+            while (pos < s.Length && char.IsWhiteSpace(s[pos])) pos++;
+        }
+
+        private System.Collections.Generic.List<EnumValueDto> ParseEnumValues(string body)
+        {
+            string arrayJson = ExtractJsonArray(body, "enumValues");
+            if (arrayJson == null) return null;
+            var result = new System.Collections.Generic.List<EnumValueDto>();
+            foreach (string obj in SplitJsonObjects(arrayJson))
+            {
+                string name = ExtractJsonString(obj, "name");
+                if (string.IsNullOrEmpty(name)) continue;
+                var dto = new EnumValueDto { Name = name };
+                string valStr = ExtractJsonString(obj, "value");
+                if (!string.IsNullOrEmpty(valStr) && int.TryParse(valStr, out int v))
+                    dto.Value = v;
+                dto.Label = ExtractJsonString(obj, "label");
+                result.Add(dto);
+            }
+            return result.Count > 0 ? result : null;
+        }
+
+        private System.Collections.Generic.List<FieldDto> ParseFields(string body)
+        {
+            string arrayJson = ExtractJsonArray(body, "fields");
+            if (arrayJson == null) return null;
+            var result = new System.Collections.Generic.List<FieldDto>();
+            foreach (string obj in SplitJsonObjects(arrayJson))
+            {
+                string name = ExtractJsonString(obj, "name");
+                if (string.IsNullOrEmpty(name)) continue;
+                result.Add(new FieldDto
+                {
+                    Name = name,
+                    FieldType = ExtractJsonString(obj, "fieldType") ?? "String",
+                    ExtendedDataType = ExtractJsonString(obj, "extendedDataType"),
+                    EnumType = ExtractJsonString(obj, "enumType"),
+                    Label = ExtractJsonString(obj, "label")
+                });
+            }
+            return result.Count > 0 ? result : null;
+        }
+
+        private System.Collections.Generic.List<IndexDto> ParseIndexes(string body)
+        {
+            string arrayJson = ExtractJsonArray(body, "indexes");
+            if (arrayJson == null) return null;
+            var result = new System.Collections.Generic.List<IndexDto>();
+            foreach (string obj in SplitJsonObjects(arrayJson))
+            {
+                string name = ExtractJsonString(obj, "name");
+                if (string.IsNullOrEmpty(name)) continue;
+                var dto = new IndexDto { Name = name };
+                string dup = ExtractJsonString(obj, "allowDuplicates");
+                dto.AllowDuplicates = "true".Equals(dup, StringComparison.OrdinalIgnoreCase);
+                string[] fields = ExtractJsonStringArray(obj, "fields");
+                if (fields != null) dto.Fields.AddRange(fields);
+                result.Add(dto);
+            }
+            return result.Count > 0 ? result : null;
+        }
+
+        private System.Collections.Generic.List<FieldGroupDto> ParseFieldGroups(string body)
+        {
+            string arrayJson = ExtractJsonArray(body, "fieldGroups");
+            if (arrayJson == null) return null;
+            var result = new System.Collections.Generic.List<FieldGroupDto>();
+            foreach (string obj in SplitJsonObjects(arrayJson))
+            {
+                string name = ExtractJsonString(obj, "name");
+                if (string.IsNullOrEmpty(name)) continue;
+                var dto = new FieldGroupDto { Name = name, Label = ExtractJsonString(obj, "label") };
+                string[] fields = ExtractJsonStringArray(obj, "fields");
+                if (fields != null) dto.Fields.AddRange(fields);
+                result.Add(dto);
+            }
+            return result.Count > 0 ? result : null;
+        }
+
+        private System.Collections.Generic.List<RelationDto> ParseRelations(string body)
+        {
+            string arrayJson = ExtractJsonArray(body, "relations");
+            if (arrayJson == null) return null;
+            var result = new System.Collections.Generic.List<RelationDto>();
+            foreach (string obj in SplitJsonObjects(arrayJson))
+            {
+                string name = ExtractJsonString(obj, "name");
+                if (string.IsNullOrEmpty(name)) continue;
+                var dto = new RelationDto
+                {
+                    Name = name,
+                    RelatedTable = ExtractJsonString(obj, "relatedTable")
+                };
+                string constraintsJson = ExtractJsonArray(obj, "constraints");
+                if (constraintsJson != null)
+                {
+                    foreach (string cObj in SplitJsonObjects(constraintsJson))
+                    {
+                        dto.Constraints.Add(new RelationConstraintDto
+                        {
+                            Field = ExtractJsonString(cObj, "field"),
+                            RelatedField = ExtractJsonString(cObj, "relatedField")
+                        });
+                    }
+                }
+                result.Add(dto);
+            }
+            return result.Count > 0 ? result : null;
+        }
+
+        private System.Collections.Generic.List<EntryPointDto> ParseEntryPoints(string body)
+        {
+            string arrayJson = ExtractJsonArray(body, "entryPoints");
+            if (arrayJson == null) return null;
+            var result = new System.Collections.Generic.List<EntryPointDto>();
+            foreach (string obj in SplitJsonObjects(arrayJson))
+            {
+                string name = ExtractJsonString(obj, "name");
+                if (string.IsNullOrEmpty(name)) continue;
+                result.Add(new EntryPointDto
+                {
+                    Name = name,
+                    ObjectType = ExtractJsonString(obj, "objectType"),
+                    ObjectName = ExtractJsonString(obj, "objectName"),
+                    Grant = ExtractJsonString(obj, "grant")
+                });
+            }
+            return result.Count > 0 ? result : null;
         }
 
         // ── Minimal JSON helpers (no external deps) ──

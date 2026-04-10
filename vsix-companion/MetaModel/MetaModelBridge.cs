@@ -6,6 +6,7 @@ using System.Text;
 using System.Xml;
 using System.Xml.Serialization;
 using Microsoft.Dynamics.AX.Metadata.MetaModel;
+using Microsoft.Dynamics.AX.Metadata.Core.MetaModel;
 using Microsoft.Dynamics.AX.Metadata.Service;
 using Microsoft.Dynamics.Framework.Tools.Extensibility;
 using Microsoft.Dynamics.Framework.Tools.Labels;
@@ -232,6 +233,7 @@ namespace XppAiCopilotCompanion.MetaModel
                         if (cls.Methods != null)
                             foreach (var m in cls.Methods)
                                 result.Methods.Add(new MethodInfo { Name = m.Name, Source = m.Source });
+                        result.Properties = ExtractProperties(cls);
                         result.ModelName = GetObjectModelName(objectType, objectName);
                         break;
 
@@ -242,7 +244,11 @@ namespace XppAiCopilotCompanion.MetaModel
                         if (tbl.Methods != null)
                             foreach (var m in tbl.Methods)
                                 result.Methods.Add(new MethodInfo { Name = m.Name, Source = m.Source });
-                        result.MetadataXml = SerializeMetadata(tbl);
+                        result.Properties = ExtractProperties(tbl);
+                        result.Fields = ExtractFields(tbl);
+                        result.Indexes = ExtractIndexes(tbl);
+                        result.FieldGroups = ExtractFieldGroups(tbl);
+                        result.Relations = ExtractRelations(tbl);
                         result.ModelName = GetObjectModelName(objectType, objectName);
                         break;
 
@@ -253,20 +259,22 @@ namespace XppAiCopilotCompanion.MetaModel
                         if (frm.Methods != null)
                             foreach (var m in frm.Methods)
                                 result.Methods.Add(new MethodInfo { Name = m.Name, Source = m.Source });
+                        result.Properties = ExtractProperties(frm);
                         result.ModelName = GetObjectModelName(objectType, objectName);
                         break;
 
                     case "AxEnum":
                         var enm = MetaService.GetEnum(objectName);
                         if (enm == null) return new ReadObjectResult { Message = "Enum '" + objectName + "' not found." };
-                        result.MetadataXml = SerializeMetadata(enm);
+                        result.Properties = ExtractProperties(enm);
+                        result.EnumValues = ExtractEnumValues(enm);
                         result.ModelName = GetObjectModelName(objectType, objectName);
                         break;
 
                     case "AxEdt":
                         var edt = MetaService.GetExtendedDataType(objectName);
                         if (edt == null) return new ReadObjectResult { Message = "EDT '" + objectName + "' not found." };
-                        result.MetadataXml = SerializeMetadata(edt);
+                        result.Properties = ExtractProperties(edt);
                         result.ModelName = GetObjectModelName(objectType, objectName);
                         break;
 
@@ -277,13 +285,14 @@ namespace XppAiCopilotCompanion.MetaModel
                         if (view.Methods != null)
                             foreach (var m in view.Methods)
                                 result.Methods.Add(new MethodInfo { Name = m.Name, Source = m.Source });
+                        result.Properties = ExtractProperties(view);
                         result.ModelName = GetObjectModelName(objectType, objectName);
                         break;
 
                     case "AxQuery":
                         var qry = MetaService.GetQuery(objectName);
                         if (qry == null) return new ReadObjectResult { Message = "Query '" + objectName + "' not found." };
-                        result.MetadataXml = SerializeMetadata(qry);
+                        result.Properties = ExtractProperties(qry);
                         result.ModelName = GetObjectModelName(objectType, objectName);
                         break;
 
@@ -708,7 +717,7 @@ namespace XppAiCopilotCompanion.MetaModel
                 axTable.Declaration = StripCData(req.Declaration);
 
             AddMethods(axTable.Methods, req.Methods);
-            ApplyMetadataXml(axTable, req.MetadataXml);
+            ApplyTypedMetadata(axTable, req);
             MetaService.CreateTable(axTable, saveInfo);
             AddToProjectIfActive("AxTable", req.ObjectName);
             return Ok("Created AxTable '" + req.ObjectName + "'.");
@@ -721,7 +730,7 @@ namespace XppAiCopilotCompanion.MetaModel
                 axForm.SourceCode.Declaration = StripCData(req.Declaration);
 
             AddMethods(axForm.Methods, req.Methods);
-            ApplyMetadataXml(axForm, req.MetadataXml);
+            ApplyTypedMetadata(axForm, req);
             MetaService.CreateForm(axForm, saveInfo);
             AddToProjectIfActive("AxForm", req.ObjectName);
             return Ok("Created AxForm '" + req.ObjectName + "'.");
@@ -730,7 +739,7 @@ namespace XppAiCopilotCompanion.MetaModel
         private MetaModelResult CreateEdt(CreateObjectRequest req, ModelSaveInfo saveInfo)
         {
             var axEdt = new AxEdtString { Name = req.ObjectName };
-            ApplyMetadataXml(axEdt, req.MetadataXml);
+            ApplyTypedMetadata(axEdt, req);
             MetaService.CreateExtendedDataType(axEdt, saveInfo);
             AddToProjectIfActive("AxEdt", req.ObjectName);
             return Ok("Created AxEdt '" + req.ObjectName + "'.");
@@ -739,7 +748,7 @@ namespace XppAiCopilotCompanion.MetaModel
         private MetaModelResult CreateEnum(CreateObjectRequest req, ModelSaveInfo saveInfo)
         {
             var axEnum = new AxEnum { Name = req.ObjectName };
-            ApplyEnumValuesFromXml(axEnum, req.MetadataXml);
+            ApplyTypedMetadata(axEnum, req);
             MetaService.CreateEnum(axEnum, saveInfo);
             AddToProjectIfActive("AxEnum", req.ObjectName);
             return Ok("Created AxEnum '" + req.ObjectName + "'.");
@@ -748,7 +757,7 @@ namespace XppAiCopilotCompanion.MetaModel
         private MetaModelResult CreateMenuItemDisplay(CreateObjectRequest req, ModelSaveInfo saveInfo)
         {
             var item = new AxMenuItemDisplay { Name = req.ObjectName };
-            ApplyMetadataXml(item, req.MetadataXml);
+            ApplyTypedMetadata(item, req);
             MetaService.CreateMenuItemDisplay(item, saveInfo);
             AddToProjectIfActive("AxMenuItemDisplay", req.ObjectName);
             return Ok("Created AxMenuItemDisplay '" + req.ObjectName + "'.");
@@ -757,7 +766,7 @@ namespace XppAiCopilotCompanion.MetaModel
         private MetaModelResult CreateMenuItemOutput(CreateObjectRequest req, ModelSaveInfo saveInfo)
         {
             var item = new AxMenuItemOutput { Name = req.ObjectName };
-            ApplyMetadataXml(item, req.MetadataXml);
+            ApplyTypedMetadata(item, req);
             MetaService.CreateMenuItemOutput(item, saveInfo);
             AddToProjectIfActive("AxMenuItemOutput", req.ObjectName);
             return Ok("Created AxMenuItemOutput '" + req.ObjectName + "'.");
@@ -766,7 +775,7 @@ namespace XppAiCopilotCompanion.MetaModel
         private MetaModelResult CreateMenuItemAction(CreateObjectRequest req, ModelSaveInfo saveInfo)
         {
             var item = new AxMenuItemAction { Name = req.ObjectName };
-            ApplyMetadataXml(item, req.MetadataXml);
+            ApplyTypedMetadata(item, req);
             MetaService.CreateMenuItemAction(item, saveInfo);
             AddToProjectIfActive("AxMenuItemAction", req.ObjectName);
             return Ok("Created AxMenuItemAction '" + req.ObjectName + "'.");
@@ -775,7 +784,7 @@ namespace XppAiCopilotCompanion.MetaModel
         private MetaModelResult CreateQuery(CreateObjectRequest req, ModelSaveInfo saveInfo)
         {
             var axQuery = new AxQuerySimple { Name = req.ObjectName };
-            ApplyMetadataXml(axQuery, req.MetadataXml);
+            ApplyTypedMetadata(axQuery, req);
             MetaService.CreateQuery(axQuery, saveInfo);
             AddToProjectIfActive("AxQuery", req.ObjectName);
             return Ok("Created AxQuery '" + req.ObjectName + "'.");
@@ -787,7 +796,7 @@ namespace XppAiCopilotCompanion.MetaModel
             if (!string.IsNullOrEmpty(req.Declaration))
                 axView.Declaration = StripCData(req.Declaration);
             AddMethods(axView.Methods, req.Methods);
-            ApplyMetadataXml(axView, req.MetadataXml);
+            ApplyTypedMetadata(axView, req);
             MetaService.CreateView(axView, saveInfo);
             AddToProjectIfActive("AxView", req.ObjectName);
             return Ok("Created AxView '" + req.ObjectName + "'.");
@@ -798,7 +807,7 @@ namespace XppAiCopilotCompanion.MetaModel
             var entity = new AxDataEntityView { Name = req.ObjectName };
             if (!string.IsNullOrEmpty(req.Declaration))
                 entity.Declaration = StripCData(req.Declaration);
-            ApplyMetadataXml(entity, req.MetadataXml);
+            ApplyTypedMetadata(entity, req);
             MetaService.UpdateDataEntityView(entity, saveInfo);
             AddToProjectIfActive("AxDataEntityView", req.ObjectName);
             return Ok("Created AxDataEntityView '" + req.ObjectName + "'.");
@@ -807,7 +816,7 @@ namespace XppAiCopilotCompanion.MetaModel
         private MetaModelResult CreateSecurityPrivilege(CreateObjectRequest req, ModelSaveInfo saveInfo)
         {
             var priv = new AxSecurityPrivilege { Name = req.ObjectName };
-            ApplyMetadataXml(priv, req.MetadataXml);
+            ApplyTypedMetadata(priv, req);
             MetaService.CreateSecurityPrivilege(priv, saveInfo);
             AddToProjectIfActive("AxSecurityPrivilege", req.ObjectName);
             return Ok("Created AxSecurityPrivilege '" + req.ObjectName + "'.");
@@ -816,7 +825,7 @@ namespace XppAiCopilotCompanion.MetaModel
         private MetaModelResult CreateSecurityDuty(CreateObjectRequest req, ModelSaveInfo saveInfo)
         {
             var duty = new AxSecurityDuty { Name = req.ObjectName };
-            ApplyMetadataXml(duty, req.MetadataXml);
+            ApplyTypedMetadata(duty, req);
             MetaService.CreateSecurityDuty(duty, saveInfo);
             AddToProjectIfActive("AxSecurityDuty", req.ObjectName);
             return Ok("Created AxSecurityDuty '" + req.ObjectName + "'.");
@@ -825,7 +834,7 @@ namespace XppAiCopilotCompanion.MetaModel
         private MetaModelResult CreateSecurityRole(CreateObjectRequest req, ModelSaveInfo saveInfo)
         {
             var role = new AxSecurityRole { Name = req.ObjectName };
-            ApplyMetadataXml(role, req.MetadataXml);
+            ApplyTypedMetadata(role, req);
             MetaService.CreateSecurityRole(role, saveInfo);
             AddToProjectIfActive("AxSecurityRole", req.ObjectName);
             return Ok("Created AxSecurityRole '" + req.ObjectName + "'.");
@@ -834,7 +843,7 @@ namespace XppAiCopilotCompanion.MetaModel
         private MetaModelResult CreateService(CreateObjectRequest req, ModelSaveInfo saveInfo)
         {
             var svc = new AxService { Name = req.ObjectName };
-            ApplyMetadataXml(svc, req.MetadataXml);
+            ApplyTypedMetadata(svc, req);
             MetaService.CreateService(svc, saveInfo);
             AddToProjectIfActive("AxService", req.ObjectName);
             return Ok("Created AxService '" + req.ObjectName + "'.");
@@ -843,7 +852,7 @@ namespace XppAiCopilotCompanion.MetaModel
         private MetaModelResult CreateServiceGroup(CreateObjectRequest req, ModelSaveInfo saveInfo)
         {
             var grp = new AxServiceGroup { Name = req.ObjectName };
-            ApplyMetadataXml(grp, req.MetadataXml);
+            ApplyTypedMetadata(grp, req);
             MetaService.CreateServiceGroup(grp, saveInfo);
             AddToProjectIfActive("AxServiceGroup", req.ObjectName);
             return Ok("Created AxServiceGroup '" + req.ObjectName + "'.");
@@ -855,7 +864,7 @@ namespace XppAiCopilotCompanion.MetaModel
             if (!string.IsNullOrEmpty(req.Declaration))
                 map.Declaration = StripCData(req.Declaration);
             AddMethods(map.Methods, req.Methods);
-            ApplyMetadataXml(map, req.MetadataXml);
+            ApplyTypedMetadata(map, req);
             MetaService.CreateMap(map, saveInfo);
             AddToProjectIfActive("AxMap", req.ObjectName);
             return Ok("Created AxMap '" + req.ObjectName + "'.");
@@ -864,7 +873,7 @@ namespace XppAiCopilotCompanion.MetaModel
         private MetaModelResult CreateMenu(CreateObjectRequest req, ModelSaveInfo saveInfo)
         {
             var menu = new AxMenu { Name = req.ObjectName };
-            ApplyMetadataXml(menu, req.MetadataXml);
+            ApplyTypedMetadata(menu, req);
             MetaService.CreateMenu(menu, saveInfo);
             AddToProjectIfActive("AxMenu", req.ObjectName);
             return Ok("Created AxMenu '" + req.ObjectName + "'.");
@@ -873,7 +882,7 @@ namespace XppAiCopilotCompanion.MetaModel
         private MetaModelResult CreateTile(CreateObjectRequest req, ModelSaveInfo saveInfo)
         {
             var tile = new AxTile { Name = req.ObjectName };
-            ApplyMetadataXml(tile, req.MetadataXml);
+            ApplyTypedMetadata(tile, req);
             MetaService.CreateTile(tile, saveInfo);
             AddToProjectIfActive("AxTile", req.ObjectName);
             return Ok("Created AxTile '" + req.ObjectName + "'.");
@@ -882,7 +891,7 @@ namespace XppAiCopilotCompanion.MetaModel
         private MetaModelResult CreateConfigurationKey(CreateObjectRequest req, ModelSaveInfo saveInfo)
         {
             var key = new AxConfigurationKey { Name = req.ObjectName };
-            ApplyMetadataXml(key, req.MetadataXml);
+            ApplyTypedMetadata(key, req);
             MetaService.CreateConfigurationKey(key, saveInfo);
             AddToProjectIfActive("AxConfigurationKey", req.ObjectName);
             return Ok("Created AxConfigurationKey '" + req.ObjectName + "'.");
@@ -901,8 +910,8 @@ namespace XppAiCopilotCompanion.MetaModel
                 var extObj = Activator.CreateInstance(extensionType);
                 extensionType.GetProperty("Name")?.SetValue(extObj, req.ObjectName);
 
-                // Apply metadata (fields, enum values, data sources, etc.)
-                ApplyMetadataXml(extObj, req.MetadataXml);
+                // Apply typed metadata (properties, enum values, fields, etc.)
+                ApplyTypedMetadata(extObj, req);
 
                 // Resolve file path
                 string filePath = GetExtensionFilePath(saveInfo, folderName, req.ObjectName);
@@ -1001,7 +1010,7 @@ namespace XppAiCopilotCompanion.MetaModel
                 tbl.Declaration = StripCData(req.Declaration);
 
             UpdateMethods(tbl.Methods, req.Methods, req.RemoveMethodNames);
-            ApplyMetadataXml(tbl, req.MetadataXml);
+            ApplyTypedMetadata(tbl, req);
             MetaService.UpdateTable(tbl, saveInfo);
             return Ok("Updated AxTable '" + req.ObjectName + "'.");
         }
@@ -1032,6 +1041,7 @@ namespace XppAiCopilotCompanion.MetaModel
             var saveInfo = GetModelSaveInfoForObject("AxEdt", req.ObjectName);
             if (saveInfo == null) return Fail("Cannot resolve model for '" + req.ObjectName + "'.");
 
+            ApplyTypedMetadata(edt, req);
             MetaService.UpdateExtendedDataType(edt, saveInfo);
             return Ok("Updated AxEdt '" + req.ObjectName + "'.");
         }
@@ -1045,7 +1055,7 @@ namespace XppAiCopilotCompanion.MetaModel
             var saveInfo = GetModelSaveInfoForObject("AxEnum", req.ObjectName);
             if (saveInfo == null) return Fail("Cannot resolve model for '" + req.ObjectName + "'.");
 
-            ApplyEnumValuesFromXml(enm, req.MetadataXml);
+            ApplyTypedMetadata(enm, req);
             MetaService.UpdateEnum(enm, saveInfo);
             return Ok("Updated AxEnum '" + req.ObjectName + "'.");
         }
@@ -1252,160 +1262,339 @@ namespace XppAiCopilotCompanion.MetaModel
             }
         }
 
-        /// <summary>
-        /// Parses metadataXml to extract AxEnumValue elements and adds them to the enum.
-        /// Accepts XML fragments like:
-        ///   &lt;EnumValues&gt;&lt;AxEnumValue&gt;&lt;Name&gt;Val&lt;/Name&gt;&lt;Value&gt;0&lt;/Value&gt;&lt;Label&gt;@LBL&lt;/Label&gt;&lt;/AxEnumValue&gt;&lt;/EnumValues&gt;
-        /// or just a list of AxEnumValue elements.
-        /// </summary>
-        private static void ApplyEnumValuesFromXml(AxEnum axEnum, string xml)
+        // ── Strongly-typed metadata apply methods ──
+
+        private static void ApplyProperties(object target, Dictionary<string, string> props)
         {
-            if (string.IsNullOrWhiteSpace(xml)) return;
-
-            try
+            if (props == null || target == null) return;
+            var type = target.GetType();
+            foreach (var kvp in props)
             {
-                // Wrap in a root element to ensure valid XML for parsing
-                string wrapped = "<Root>" + xml + "</Root>";
-                var doc = new XmlDocument();
-                doc.LoadXml(wrapped);
-
-                var valueNodes = doc.GetElementsByTagName("AxEnumValue");
-                int autoValue = 0;
-                // Determine the next auto-value based on existing values
-                foreach (var existing in axEnum.EnumValues)
-                {
-                    if (existing.Value >= autoValue)
-                        autoValue = existing.Value + 1;
-                }
-
-                foreach (XmlNode node in valueNodes)
-                {
-                    string name = node.SelectSingleNode("Name")?.InnerText;
-                    if (string.IsNullOrWhiteSpace(name)) continue;
-
-                    // Skip if value with same name already exists
-                    if (axEnum.EnumValues.Contains(name))
-                        continue;
-
-                    var enumValue = new AxEnumValue { Name = name };
-
-                    string valueStr = node.SelectSingleNode("Value")?.InnerText;
-                    if (!string.IsNullOrEmpty(valueStr) && int.TryParse(valueStr, out int val))
-                        enumValue.Value = val;
-                    else
-                        enumValue.Value = autoValue++;
-
-                    string label = node.SelectSingleNode("Label")?.InnerText;
-                    if (!string.IsNullOrEmpty(label))
-                        enumValue.Label = label;
-
-                    axEnum.EnumValues.Add(enumValue);
-                }
-            }
-            catch
-            {
-                // Best effort — if the XML can't be parsed, skip silently
-            }
-        }
-
-        private void ApplyMetadataXml(object axObject, string xml)
-        {
-            if (axObject == null || string.IsNullOrWhiteSpace(xml))
-                return;
-
-            var type = axObject.GetType();
-
-            // Handle enum values specially — collection properties can't be set via reflection
-            if (axObject is AxEnum axEnum)
-            {
-                ApplyEnumValuesFromXml(axEnum, xml);
-                return;
-            }
-            string typeName = type.Name;
-
-            string wrappedXml = BuildWrappedMetadataXml(typeName, axObject, xml);
-            object parsed = DeserializeMetadataObject(type, wrappedXml);
-            if (parsed == null)
-                return;
-
-            CopyMetadataProperties(parsed, axObject);
-        }
-
-        private string SerializeMetadata(object axObject)
-        {
-            if (axObject == null)
-                return null;
-
-            try
-            {
-                var serializer = new XmlSerializer(axObject.GetType());
-                using (var sw = new StringWriter())
-                {
-                    serializer.Serialize(sw, axObject);
-                    return sw.ToString();
-                }
-            }
-            catch
-            {
-                return null;
-            }
-        }
-
-        private static string BuildWrappedMetadataXml(string typeName, object axObject, string xml)
-        {
-            string trimmed = xml.Trim();
-            if (trimmed.StartsWith("<" + typeName, StringComparison.Ordinal))
-                return trimmed;
-
-            string name = axObject.GetType().GetProperty("Name")?.GetValue(axObject) as string;
-            if (string.IsNullOrEmpty(name))
-                name = "Temp";
-
-            return "<" + typeName + ">"
-                + "<Name>" + System.Security.SecurityElement.Escape(name) + "</Name>"
-                + trimmed
-                + "</" + typeName + ">";
-        }
-
-        private static object DeserializeMetadataObject(Type type, string xml)
-        {
-            try
-            {
-                var serializer = new XmlSerializer(type);
-                using (var sr = new StringReader(xml))
-                    return serializer.Deserialize(sr);
-            }
-            catch
-            {
-                return null;
-            }
-        }
-
-        private static void CopyMetadataProperties(object source, object target)
-        {
-            var excluded = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
-            {
-                "Name", "SourceCode", "Methods", "UnparsableSource", "Attributes", "Members"
-            };
-
-            var props = source.GetType().GetProperties();
-            foreach (var prop in props)
-            {
-                if (!prop.CanRead || !prop.CanWrite)
-                    continue;
-                if (excluded.Contains(prop.Name))
-                    continue;
-
+                var prop = type.GetProperty(kvp.Key);
+                if (prop == null || !prop.CanWrite) continue;
                 try
                 {
-                    var value = prop.GetValue(source);
+                    var propType = prop.PropertyType;
+                    var underlying = Nullable.GetUnderlyingType(propType);
+                    object value;
+
+                    if (underlying != null)
+                    {
+                        if (string.IsNullOrEmpty(kvp.Value))
+                            value = null;
+                        else if (underlying == typeof(bool))
+                            value = bool.Parse(kvp.Value);
+                        else if (underlying == typeof(int))
+                            value = int.Parse(kvp.Value);
+                        else if (underlying.IsEnum)
+                            value = Enum.Parse(underlying, kvp.Value, true);
+                        else
+                            continue;
+                    }
+                    else if (propType == typeof(string))
+                        value = kvp.Value;
+                    else if (propType == typeof(bool))
+                        value = "true".Equals(kvp.Value, StringComparison.OrdinalIgnoreCase)
+                             || "1".Equals(kvp.Value) || "yes".Equals(kvp.Value, StringComparison.OrdinalIgnoreCase);
+                    else if (propType == typeof(int))
+                        value = int.Parse(kvp.Value);
+                    else if (propType == typeof(long))
+                        value = long.Parse(kvp.Value);
+                    else if (propType.IsEnum)
+                        value = Enum.Parse(propType, kvp.Value, true);
+                    else
+                        continue;
+
                     prop.SetValue(target, value);
                 }
-                catch
+                catch { }
+            }
+        }
+
+        private static void ApplyEnumValues(AxEnum axEnum, List<EnumValueDto> values)
+        {
+            if (values == null) return;
+            int autoValue = 0;
+            foreach (var existing in axEnum.EnumValues)
+            {
+                if (existing.Value >= autoValue)
+                    autoValue = existing.Value + 1;
+            }
+            foreach (var dto in values)
+            {
+                if (string.IsNullOrWhiteSpace(dto.Name)) continue;
+                if (axEnum.EnumValues.Contains(dto.Name)) continue;
+                var ev = new AxEnumValue { Name = dto.Name, Value = dto.Value };
+                if (!string.IsNullOrEmpty(dto.Label))
+                    ev.Label = dto.Label;
+                axEnum.EnumValues.Add(ev);
+            }
+        }
+
+        private static void ApplyFields(AxTable tbl, List<FieldDto> fields)
+        {
+            if (fields == null) return;
+            foreach (var f in fields)
+            {
+                if (string.IsNullOrEmpty(f.Name)) continue;
+                AxTableField axField;
+                switch ((f.FieldType ?? "String").ToLowerInvariant())
                 {
-                    // Best effort: continue copying remaining properties.
+                    case "int": axField = new AxTableFieldInt(); break;
+                    case "real": axField = new AxTableFieldReal(); break;
+                    case "date": axField = new AxTableFieldDate(); break;
+                    case "datetime": axField = new AxTableFieldUtcDateTime(); break;
+                    case "enum": axField = new AxTableFieldEnum(); break;
+                    case "int64": axField = new AxTableFieldInt64(); break;
+                    case "container": axField = new AxTableFieldContainer(); break;
+                    case "guid": axField = new AxTableFieldGuid(); break;
+                    case "time": axField = new AxTableFieldTime(); break;
+                    default: axField = new AxTableFieldString(); break;
+                }
+                axField.Name = f.Name;
+                if (!string.IsNullOrEmpty(f.Label))
+                    axField.Label = f.Label;
+                if (!string.IsNullOrEmpty(f.ExtendedDataType))
+                {
+                    var edtProp = axField.GetType().GetProperty("ExtendedDataType");
+                    edtProp?.SetValue(axField, f.ExtendedDataType);
+                }
+                if (axField is AxTableFieldEnum enumField && !string.IsNullOrEmpty(f.EnumType))
+                    enumField.EnumType = f.EnumType;
+                tbl.Fields.Add(axField);
+            }
+        }
+
+        private static void ApplyIndexes(AxTable tbl, List<IndexDto> indexes)
+        {
+            if (indexes == null) return;
+            foreach (var idx in indexes)
+            {
+                if (string.IsNullOrEmpty(idx.Name)) continue;
+                var axIdx = new AxTableIndex { Name = idx.Name, AllowDuplicates = idx.AllowDuplicates ? NoYes.Yes : NoYes.No };
+                if (idx.Fields != null)
+                    foreach (string fieldName in idx.Fields)
+                        axIdx.Fields.Add(new AxTableIndexField { Name = fieldName, DataField = fieldName });
+                tbl.Indexes.Add(axIdx);
+            }
+        }
+
+        private static void ApplyFieldGroups(AxTable tbl, List<FieldGroupDto> groups)
+        {
+            if (groups == null) return;
+            foreach (var fg in groups)
+            {
+                if (string.IsNullOrEmpty(fg.Name)) continue;
+                var axFg = new AxTableFieldGroup { Name = fg.Name };
+                if (!string.IsNullOrEmpty(fg.Label))
+                    axFg.Label = fg.Label;
+                if (fg.Fields != null)
+                    foreach (string fieldName in fg.Fields)
+                        axFg.Fields.Add(new AxTableFieldGroupField { Name = fieldName, DataField = fieldName });
+                tbl.FieldGroups.Add(axFg);
+            }
+        }
+
+        private static void ApplyRelations(AxTable tbl, List<RelationDto> relations)
+        {
+            if (relations == null) return;
+            foreach (var rel in relations)
+            {
+                if (string.IsNullOrEmpty(rel.Name)) continue;
+                var axRel = new AxTableRelation { Name = rel.Name };
+                if (!string.IsNullOrEmpty(rel.RelatedTable))
+                    axRel.RelatedTable = rel.RelatedTable;
+                if (rel.Constraints != null)
+                {
+                    foreach (var c in rel.Constraints)
+                    {
+                        axRel.Constraints.Add(new AxTableRelationConstraintField
+                        {
+                            Name = (c.Field ?? "") + "_" + (c.RelatedField ?? ""),
+                            Field = c.Field,
+                            RelatedField = c.RelatedField
+                        });
+                    }
+                }
+                tbl.Relations.Add(axRel);
+            }
+        }
+
+        private static void ApplyEntryPoints(object secObj, List<EntryPointDto> entryPoints)
+        {
+            if (entryPoints == null) return;
+            // Use reflection to access EntryPoints/Privileges collections
+            var epProp = secObj.GetType().GetProperty("EntryPoints");
+            if (epProp != null)
+            {
+                var collection = epProp.GetValue(secObj);
+                var addMethod = collection?.GetType().GetMethod("Add");
+                if (addMethod != null)
+                {
+                    foreach (var ep in entryPoints)
+                    {
+                        if (string.IsNullOrEmpty(ep.Name)) continue;
+                        var axEp = new AxSecurityEntryPointReference { Name = ep.Name };
+                        if (!string.IsNullOrEmpty(ep.ObjectName))
+                            axEp.ObjectName = ep.ObjectName;
+                        try
+                        {
+                            if (!string.IsNullOrEmpty(ep.ObjectType))
+                                axEp.ObjectType = (EntryPointType)Enum.Parse(typeof(EntryPointType), ep.ObjectType, true);
+                        }
+                        catch { }
+                        addMethod.Invoke(collection, new object[] { axEp });
+                    }
                 }
             }
+        }
+
+        private void ApplyTypedMetadata(object target, CreateObjectRequest req)
+        {
+            ApplyProperties(target, req.Properties);
+            if (target is AxEnum axEnum)
+                ApplyEnumValues(axEnum, req.EnumValues);
+            if (target is AxTable axTable)
+            {
+                ApplyFields(axTable, req.Fields);
+                ApplyIndexes(axTable, req.Indexes);
+                ApplyFieldGroups(axTable, req.FieldGroups);
+                ApplyRelations(axTable, req.Relations);
+            }
+            ApplyEntryPoints(target, req.EntryPoints);
+        }
+
+        private void ApplyTypedMetadata(object target, UpdateObjectRequest req)
+        {
+            ApplyProperties(target, req.Properties);
+            if (target is AxEnum axEnum)
+                ApplyEnumValues(axEnum, req.EnumValues);
+            if (target is AxTable axTable)
+            {
+                ApplyFields(axTable, req.Fields);
+                ApplyIndexes(axTable, req.Indexes);
+                ApplyFieldGroups(axTable, req.FieldGroups);
+                ApplyRelations(axTable, req.Relations);
+            }
+            ApplyEntryPoints(target, req.EntryPoints);
+        }
+
+        // ── Strongly-typed metadata extraction (for read) ──
+
+        private static Dictionary<string, string> ExtractProperties(object axObj)
+        {
+            var props = new Dictionary<string, string>();
+            if (axObj == null) return props;
+
+            var excluded = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
+            {
+                "Name", "SourceCode", "Declaration", "Methods", "UnparsableSource",
+                "Attributes", "Members", "Fields", "FieldGroups", "Indexes",
+                "Relations", "EnumValues", "FormControl", "DataSources",
+                "EntryPoints", "Privileges", "Duties", "SubRoles", "Controls",
+                "Parts", "FullTextIndexes", "Mappings", "StateMachines",
+                "DeleteActions", "FieldReferences", "Events"
+            };
+
+            foreach (var prop in axObj.GetType().GetProperties())
+            {
+                if (!prop.CanRead || excluded.Contains(prop.Name)) continue;
+                var propType = prop.PropertyType;
+                var underlying = Nullable.GetUnderlyingType(propType) ?? propType;
+                if (underlying != typeof(string) && underlying != typeof(bool)
+                    && underlying != typeof(int) && underlying != typeof(long)
+                    && !underlying.IsEnum)
+                    continue;
+                try
+                {
+                    var val = prop.GetValue(axObj);
+                    if (val == null) continue;
+                    // Skip defaults to keep output clean
+                    if (underlying == typeof(bool) && !(bool)val) continue;
+                    if (underlying == typeof(int) && (int)val == 0) continue;
+                    if (underlying == typeof(long) && (long)val == 0) continue;
+                    if (underlying == typeof(string) && string.IsNullOrEmpty((string)val)) continue;
+                    if (underlying.IsEnum && Convert.ToInt32(val) == 0) continue;
+                    props[prop.Name] = val.ToString();
+                }
+                catch { }
+            }
+            return props;
+        }
+
+        private static List<EnumValueDto> ExtractEnumValues(AxEnum enm)
+        {
+            var result = new List<EnumValueDto>();
+            if (enm?.EnumValues == null) return result;
+            foreach (var v in enm.EnumValues)
+                result.Add(new EnumValueDto { Name = v.Name, Value = v.Value, Label = v.Label });
+            return result;
+        }
+
+        private static List<FieldDto> ExtractFields(AxTable tbl)
+        {
+            var result = new List<FieldDto>();
+            if (tbl?.Fields == null) return result;
+            foreach (var f in tbl.Fields)
+            {
+                string fieldType = f.GetType().Name;
+                if (fieldType.StartsWith("AxTableField"))
+                    fieldType = fieldType.Substring("AxTableField".Length);
+                var dto = new FieldDto { Name = f.Name, FieldType = fieldType, Label = f.Label };
+                var edtProp = f.GetType().GetProperty("ExtendedDataType");
+                if (edtProp != null)
+                    dto.ExtendedDataType = edtProp.GetValue(f) as string;
+                if (f is AxTableFieldEnum enumField)
+                    dto.EnumType = enumField.EnumType;
+                result.Add(dto);
+            }
+            return result;
+        }
+
+        private static List<IndexDto> ExtractIndexes(AxTable tbl)
+        {
+            var result = new List<IndexDto>();
+            if (tbl?.Indexes == null) return result;
+            foreach (var idx in tbl.Indexes)
+            {
+                var dto = new IndexDto { Name = idx.Name, AllowDuplicates = idx.AllowDuplicates == NoYes.Yes };
+                if (idx.Fields != null)
+                    foreach (var f in idx.Fields)
+                        dto.Fields.Add(f.DataField);
+                result.Add(dto);
+            }
+            return result;
+        }
+
+        private static List<FieldGroupDto> ExtractFieldGroups(AxTable tbl)
+        {
+            var result = new List<FieldGroupDto>();
+            if (tbl?.FieldGroups == null) return result;
+            foreach (var fg in tbl.FieldGroups)
+            {
+                var dto = new FieldGroupDto { Name = fg.Name, Label = fg.Label };
+                if (fg.Fields != null)
+                    foreach (var f in fg.Fields)
+                        dto.Fields.Add(f.DataField);
+                result.Add(dto);
+            }
+            return result;
+        }
+
+        private static List<RelationDto> ExtractRelations(AxTable tbl)
+        {
+            var result = new List<RelationDto>();
+            if (tbl?.Relations == null) return result;
+            foreach (var rel in tbl.Relations)
+            {
+                var dto = new RelationDto { Name = rel.Name, RelatedTable = rel.RelatedTable };
+                if (rel.Constraints != null)
+                    foreach (var c in rel.Constraints)
+                        if (c is AxTableRelationConstraintField fc)
+                            dto.Constraints.Add(new RelationConstraintDto { Field = fc.Field, RelatedField = fc.RelatedField });
+                result.Add(dto);
+            }
+            return result;
         }
 
         private static string TryGetLabelText(object controller, string labelId)

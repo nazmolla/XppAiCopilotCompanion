@@ -309,19 +309,17 @@ For EACH object, follow these three steps:
       - ObjectName: the name from your plan (following the model's prefix convention)
       - BaseObjectName: (for extensions) the name of the object being extended
 
-  STEP 2 — Define the metadata (via MetadataXml parameter)
-    Pass a MetadataXml string containing the XML fragments for structural metadata.
-    This goes AFTER the SourceCode block inside the root element.
-    Examples of what to include:
-      - Tables: <Fields>, <FieldGroups>, <Indexes>, <FullTextIndexes>,
-        <Relations>, <DeleteActions>, <TableGroup>, <CacheLookup>, etc.
-      - Forms: <Design> (with controls, tabs, grids, action panes),
-        <DataSources> (with joins, ranges, fields)
-      - EDTs: <Extends>, <StringSize>, <Label>, <HelpText>, <ReferenceTable>,
-        i:type attribute on root (e.g. AxEdtString, AxEdtInt, AxEdtReal)
-      - Enums: <EnumValues> with <AxEnumValue> entries (Name, Label, Value)
-      - Menu items: <Object>, <ObjectType>, <Label>, <SecurityPrivilege>
-      - Queries: <DataSources> with ranges, sorting, relations
+  STEP 2 — Define the metadata (via typed JSON parameters)
+    Use strongly-typed JSON parameters instead of XML:
+      - properties: {"Label": "...", "IsExtensible": "true", ...} for scalar metadata
+      - enumValues: [{"name": "...", "value": 0, "label": "..."}] for AxEnum values
+      - fields: [{"name": "...", "fieldType": "String", "extendedDataType": "..."}] for table fields
+      - indexes: [{"name": "...", "allowDuplicates": false, "fields": ["FieldName"]}]
+      - fieldGroups: [{"name": "...", "label": "...", "fields": ["FieldName"]}]
+      - relations: [{"name": "...", "relatedTable": "...", "constraints": [{"field": "...", "relatedField": "..."}]}]
+      - entryPoints: [{"name": "...", "objectType": "...", "objectName": "..."}] for security
+    TIP: Use xpp_read_object on an existing similar object to discover exact property names
+    and see the formatted output you can reuse as a template.
     Include ALL metadata — do not leave anything for manual designer configuration.
 
   STEP 3 — Write the code (via SuggestedCode + Methods parameters)
@@ -368,8 +366,8 @@ When the user asks to modify, fix, or enhance an existing custom object:
       - declaration: new class/table declaration (replaces existing)
       - methods: array of method source strings to update or add
       - removeMethodNames: array of method names to delete
-      - metadataXml: new metadata XML (replaces ALL existing metadata outside
-        Name and SourceCode — include the complete metadata you want)
+      - properties: JSON object of scalar properties to set/update
+      - enumValues, fields, indexes, fieldGroups, relations: typed arrays to add
 
   STEP 4 — Project membership
     After editing, ensure the object file is in the active VS project:
@@ -1408,36 +1406,9 @@ Objects to create:
   Create an AxQuery with xpp_create_object:
     ObjectType: AxQuery
     ObjectName: PrefixReportNameQuery
-    MetadataXml: define data sources, joins, ranges, sorting
-  Example metadata:
-    <DataSources>
-      <QuerySimpleRootDataSource>
-        <Name>CustTable</Name>
-        <Table>CustTable</Table>
-        <DynamicFields>Yes</DynamicFields>
-        <Ranges>
-          <QuerySimpleRange>
-            <Name>CustGroup</Name>
-            <Field>CustGroup</Field>
-          </QuerySimpleRange>
-        </Ranges>
-        <DataSources>
-          <QuerySimpleEmbeddedDataSource>
-            <Name>CustTrans</Name>
-            <Table>CustTrans</Table>
-            <DynamicFields>Yes</DynamicFields>
-            <JoinMode>InnerJoin</JoinMode>
-            <Relations>Yes</Relations>
-            <Ranges>
-              <QuerySimpleRange>
-                <Name>TransDate</Name>
-                <Field>TransDate</Field>
-              </QuerySimpleRange>
-            </Ranges>
-          </QuerySimpleEmbeddedDataSource>
-        </DataSources>
-      </QuerySimpleRootDataSource>
-    </DataSources>
+    properties: {"Title": "Report Query"}
+    Use xpp_read_object on an existing query to see the structure.
+
 
 --- 3. Report Data Provider (query-based) ---
   [SRSReportQueryAttribute(queryStr(PrefixReportNameQuery))]
