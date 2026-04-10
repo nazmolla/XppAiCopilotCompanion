@@ -36,7 +36,7 @@ namespace XppAiCopilotCompanion
     // Must match ServerVersion in mcp-server/Program.cs.
     // When the server exe is updated, bump this to force stale cached
     // processes to be killed and replaced with the new binary.
-    private const string ExpectedMcpServerVersion = "0.5.0";
+    private const string ExpectedMcpServerVersion = "0.6.0";
 
         protected override async Task InitializeAsync(
             CancellationToken cancellationToken,

@@ -19,7 +19,7 @@ namespace XppAiCopilotCompanion.McpServer
     internal static class Program
     {
         private const string ServerName = "xpp-copilot-companion";
-        private const string ServerVersion = "0.5.0";
+        private const string ServerVersion = "0.6.0";
 
         private const int DefaultPort = 21329;
         private static readonly string PortFilePath = Path.Combine(

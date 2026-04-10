@@ -256,6 +256,10 @@ namespace XppAiCopilotCompanion.McpServer
         {
             string argsJson = JsonHelpers.ExtractToolArgumentsObject(json);
 
+            // Log full arguments for create/update to aid debugging
+            if (action == "create_object" || action == "update_object")
+                McpLogger.Log("bridge args (" + action + "): " + argsJson);
+
             if (!_bridge.IsAvailable())
             {
                 return JsonHelpers.BuildToolResult(idToken,

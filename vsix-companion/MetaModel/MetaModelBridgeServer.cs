@@ -22,6 +22,20 @@ namespace XppAiCopilotCompanion.MetaModel
         private CancellationTokenSource _cts;
         private bool _running;
 
+        private static readonly string BridgeLogPath =
+            Path.Combine(Path.GetTempPath(), "XppBridge.log");
+
+        private static void BridgeLog(string msg)
+        {
+            try
+            {
+                File.AppendAllText(BridgeLogPath,
+                    DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss.fff") + " " + msg + Environment.NewLine,
+                    Encoding.UTF8);
+            }
+            catch { }
+        }
+
         public MetaModelBridgeServer(IMetaModelBridge bridge)
         {
             _bridge = bridge ?? throw new ArgumentNullException(nameof(bridge));
@@ -159,6 +173,8 @@ namespace XppAiCopilotCompanion.MetaModel
 
         private string HandleCreateObject(string body)
         {
+            BridgeLog("HandleCreateObject body=" + body);
+
             var req = new CreateObjectRequest
             {
                 ObjectType = ExtractJsonString(body, "objectType"),
@@ -174,6 +190,15 @@ namespace XppAiCopilotCompanion.MetaModel
                 Relations = ParseRelations(body),
                 EntryPoints = ParseEntryPoints(body)
             };
+
+            // Fallback: Copilot may stuff typed metadata into "metadataXml" as a JSON string
+            NormalizeFromMetadataXml(body, req);
+
+            BridgeLog("create_object type=" + req.ObjectType + " name=" + req.ObjectName
+                + " props=" + (req.Properties?.Count ?? 0)
+                + " enumValues=" + (req.EnumValues?.Count ?? 0)
+                + " fields=" + (req.Fields?.Count ?? 0));
+
             var result = _bridge.CreateObject(req);
             return SerializeResult(result);
         }
@@ -210,6 +235,10 @@ namespace XppAiCopilotCompanion.MetaModel
                 Relations = ParseRelations(body),
                 EntryPoints = ParseEntryPoints(body)
             };
+
+            // Fallback: Copilot may stuff typed metadata into "metadataXml" as a JSON string
+            NormalizeFromMetadataXml(body, req);
+
             var result = _bridge.UpdateObject(req);
             return SerializeResult(result);
         }
@@ -587,6 +616,72 @@ namespace XppAiCopilotCompanion.MetaModel
             sb.Append("]");
         }
 
+        // ── metadataXml normalization fallback ──
+
+        /// <summary>
+        /// If Copilot sends a "metadataXml" parameter (a JSON-encoded string containing
+        /// properties and/or typed arrays), extract its content and fill any missing fields
+        /// on the request object. This handles the common LLM pattern of stuffing all
+        /// metadata into a single string parameter instead of using the typed schema.
+        /// </summary>
+        private void NormalizeFromMetadataXml(string body, CreateObjectRequest req)
+        {
+            if (req.Properties != null || req.EnumValues != null || req.Fields != null)
+                return; // Already have typed metadata, skip fallback
+
+            string metadataJson = ExtractJsonString(body, "metadataXml");
+            if (string.IsNullOrEmpty(metadataJson)) return;
+
+            // metadataJson is the decoded JSON string — a flat object with properties
+            // and optionally typed arrays like enumValues, fields, etc.
+            if (req.EnumValues == null) req.EnumValues = ParseEnumValues(metadataJson);
+            if (req.Fields == null) req.Fields = ParseFields(metadataJson);
+            if (req.Indexes == null) req.Indexes = ParseIndexes(metadataJson);
+            if (req.FieldGroups == null) req.FieldGroups = ParseFieldGroups(metadataJson);
+            if (req.Relations == null) req.Relations = ParseRelations(metadataJson);
+            if (req.EntryPoints == null) req.EntryPoints = ParseEntryPoints(metadataJson);
+
+            // Extract top-level key-value pairs as properties (excluding known typed keys)
+            if (req.Properties == null)
+                req.Properties = ExtractJsonObject(metadataJson, "properties") ?? ExtractFlatProperties(metadataJson);
+
+            // Also check for objectType/objectName/declaration inside metadataXml
+            if (string.IsNullOrEmpty(req.ObjectType))
+                req.ObjectType = ExtractJsonString(metadataJson, "objectType");
+            if (string.IsNullOrEmpty(req.ObjectName))
+                req.ObjectName = ExtractJsonString(metadataJson, "objectName");
+            if (string.IsNullOrEmpty(req.ModelName))
+                req.ModelName = ExtractJsonString(metadataJson, "modelName");
+            if (string.IsNullOrEmpty(req.Declaration))
+                req.Declaration = ExtractJsonString(metadataJson, "declaration");
+        }
+
+        private void NormalizeFromMetadataXml(string body, UpdateObjectRequest req)
+        {
+            if (req.Properties != null || req.EnumValues != null || req.Fields != null)
+                return;
+
+            string metadataJson = ExtractJsonString(body, "metadataXml");
+            if (string.IsNullOrEmpty(metadataJson)) return;
+
+            if (req.EnumValues == null) req.EnumValues = ParseEnumValues(metadataJson);
+            if (req.Fields == null) req.Fields = ParseFields(metadataJson);
+            if (req.Indexes == null) req.Indexes = ParseIndexes(metadataJson);
+            if (req.FieldGroups == null) req.FieldGroups = ParseFieldGroups(metadataJson);
+            if (req.Relations == null) req.Relations = ParseRelations(metadataJson);
+            if (req.EntryPoints == null) req.EntryPoints = ParseEntryPoints(metadataJson);
+
+            if (req.Properties == null)
+                req.Properties = ExtractJsonObject(metadataJson, "properties") ?? ExtractFlatProperties(metadataJson);
+
+            if (string.IsNullOrEmpty(req.ObjectType))
+                req.ObjectType = ExtractJsonString(metadataJson, "objectType");
+            if (string.IsNullOrEmpty(req.ObjectName))
+                req.ObjectName = ExtractJsonString(metadataJson, "objectName");
+            if (string.IsNullOrEmpty(req.Declaration))
+                req.Declaration = ExtractJsonString(metadataJson, "declaration");
+        }
+
         // ── Typed metadata parsing helpers ──
 
         private static System.Collections.Generic.Dictionary<string, string> ExtractJsonObject(string json, string key)
@@ -627,7 +722,7 @@ namespace XppAiCopilotCompanion.MetaModel
                 SkipWhitespace(content, ref pos);
                 if (pos < content.Length && content[pos] == ':') pos++;
                 SkipWhitespace(content, ref pos);
-                string v = ReadJsonString(content, ref pos);
+                string v = ReadJsonValue(content, ref pos);
                 if (v != null) dict[k] = v;
                 SkipWhitespace(content, ref pos);
                 if (pos < content.Length && content[pos] == ',') pos++;
@@ -863,6 +958,75 @@ namespace XppAiCopilotCompanion.MetaModel
             return result.Count > 0 ? result : null;
         }
 
+        // ── Flat-property extraction for metadataXml fallback ──
+
+        /// <summary>
+        /// Scans a JSON object for all top-level key-value pairs whose values are simple types
+        /// (string, number, boolean). Skips arrays, objects, and known typed-array keys.
+        /// Returns remaining pairs as a property dictionary.
+        /// </summary>
+        private static readonly System.Collections.Generic.HashSet<string> _reservedKeys =
+            new System.Collections.Generic.HashSet<string>(StringComparer.OrdinalIgnoreCase)
+            {
+                "objectType", "objectName", "modelName", "declaration", "methods",
+                "enumValues", "fields", "indexes", "fieldGroups", "relations",
+                "entryPoints", "properties", "action", "metadataXml"
+            };
+
+        private static System.Collections.Generic.Dictionary<string, string> ExtractFlatProperties(string json)
+        {
+            if (string.IsNullOrEmpty(json)) return null;
+            var dict = new System.Collections.Generic.Dictionary<string, string>();
+            int pos = json.IndexOf('{');
+            if (pos < 0) return null;
+            pos++; // skip opening brace
+
+            while (pos < json.Length)
+            {
+                SkipWhitespace(json, ref pos);
+                if (pos >= json.Length || json[pos] == '}') break;
+
+                // Read key
+                string key = ReadJsonString(json, ref pos);
+                if (key == null) break;
+                SkipWhitespace(json, ref pos);
+                if (pos >= json.Length || json[pos] != ':') break;
+                pos++; // skip colon
+                SkipWhitespace(json, ref pos);
+                if (pos >= json.Length) break;
+
+                // Skip arrays and objects
+                if (json[pos] == '[' || json[pos] == '{')
+                {
+                    // Skip the entire array/object
+                    int depth = 0;
+                    char open = json[pos], close = open == '[' ? ']' : '}';
+                    bool inStr = false; bool esc = false;
+                    for (int i = pos; i < json.Length; i++)
+                    {
+                        char c = json[i];
+                        if (esc) { esc = false; continue; }
+                        if (c == '\\') { esc = true; continue; }
+                        if (c == '"') { inStr = !inStr; continue; }
+                        if (inStr) continue;
+                        if (c == open) depth++;
+                        if (c == close) { depth--; if (depth == 0) { pos = i + 1; break; } }
+                    }
+                }
+                else
+                {
+                    // Read simple value
+                    string value = ReadJsonValue(json, ref pos);
+                    if (value != null && !_reservedKeys.Contains(key))
+                        dict[key] = value;
+                }
+
+                SkipWhitespace(json, ref pos);
+                if (pos < json.Length && json[pos] == ',') pos++;
+            }
+            return dict.Count > 0 ? dict : null;
+        }
+
         // ── Minimal JSON helpers (no external deps) ──
 
         private static string ExtractJsonString(string json, string key)
@@ -875,7 +1039,27 @@ namespace XppAiCopilotCompanion.MetaModel
             if (colon < 0) return null;
             int start = colon + 1;
             while (start < json.Length && char.IsWhiteSpace(json[start])) start++;
-            if (start >= json.Length || json[start] != '"') return null;
+            if (start >= json.Length) return null;
+
+            // Handle bare numbers
+            if (char.IsDigit(json[start]) || json[start] == '-')
+            {
+                int numEnd = start;
+                while (numEnd < json.Length && (char.IsDigit(json[numEnd]) || json[numEnd] == '.' || json[numEnd] == '-'))
+                    numEnd++;
+                return json.Substring(start, numEnd - start);
+            }
+
+            // Handle bare booleans
+            if (json[start] == 't' || json[start] == 'f')
+            {
+                int tokenEnd = start;
+                while (tokenEnd < json.Length && char.IsLetter(json[tokenEnd])) tokenEnd++;
+                return json.Substring(start, tokenEnd - start);
+            }
+
+            if (json[start] == 'n') return null; // null literal
+            if (json[start] != '"') return null;
 
             var sb = new StringBuilder();
             for (int i = start + 1; i < json.Length; i++)
