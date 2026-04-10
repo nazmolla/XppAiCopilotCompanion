@@ -378,6 +378,8 @@ namespace XppAiCopilotCompanion.MetaModel
                 return new ListObjectsResult { Message = "MetaModel service not available." };
 
             var result = new ListObjectsResult { Success = true };
+            bool hasNameFilter = !string.IsNullOrEmpty(nameFilter);
+            bool hasModelFilter = !string.IsNullOrEmpty(modelName);
 
             try
             {
@@ -386,14 +388,23 @@ namespace XppAiCopilotCompanion.MetaModel
                 {
                     foreach (string name in searcher.GetNames())
                     {
-                        string objModel = GetObjectModelName(searcher.TypeName, name);
-                        if (!string.IsNullOrEmpty(modelName) &&
-                            !objModel.Equals(modelName, StringComparison.OrdinalIgnoreCase))
-                            continue;
-
-                        if (!string.IsNullOrEmpty(nameFilter) &&
+                        // Apply cheap name filter FIRST to avoid expensive model lookups
+                        if (hasNameFilter &&
                             name.IndexOf(nameFilter, StringComparison.OrdinalIgnoreCase) < 0)
                             continue;
+
+                        // Only do the expensive model lookup when needed
+                        string objModel = null;
+                        if (hasModelFilter)
+                        {
+                            objModel = GetObjectModelName(searcher.TypeName, name);
+                            if (!modelName.Equals(objModel, StringComparison.OrdinalIgnoreCase))
+                                continue;
+                        }
+
+                        // Lazy-resolve model name if not already fetched
+                        if (objModel == null)
+                            objModel = GetObjectModelName(searcher.TypeName, name);
 
                         result.Objects.Add(new FoundObject
                         {
@@ -656,7 +667,7 @@ namespace XppAiCopilotCompanion.MetaModel
         {
             var axClass = new AxClass { Name = req.ObjectName };
             if (!string.IsNullOrEmpty(req.Declaration))
-                axClass.Declaration = req.Declaration;
+                axClass.Declaration = StripCData(req.Declaration);
             else
                 axClass.Declaration = "class " + req.ObjectName + "\n{\n}";
 
@@ -670,7 +681,7 @@ namespace XppAiCopilotCompanion.MetaModel
         {
             var axTable = new AxTable { Name = req.ObjectName };
             if (!string.IsNullOrEmpty(req.Declaration))
-                axTable.Declaration = req.Declaration;
+                axTable.Declaration = StripCData(req.Declaration);
 
             AddMethods(axTable.Methods, req.Methods);
             ApplyMetadataXml(axTable, req.MetadataXml);
@@ -683,7 +694,7 @@ namespace XppAiCopilotCompanion.MetaModel
         {
             var axForm = new AxForm { Name = req.ObjectName };
             if (!string.IsNullOrEmpty(req.Declaration))
-                axForm.SourceCode.Declaration = req.Declaration;
+                axForm.SourceCode.Declaration = StripCData(req.Declaration);
 
             AddMethods(axForm.Methods, req.Methods);
             MetaService.CreateForm(axForm, saveInfo);
@@ -694,6 +705,7 @@ namespace XppAiCopilotCompanion.MetaModel
         private MetaModelResult CreateEdt(CreateObjectRequest req, ModelSaveInfo saveInfo)
         {
             var axEdt = new AxEdtString { Name = req.ObjectName };
+            ApplyMetadataXml(axEdt, req.MetadataXml);
             MetaService.CreateExtendedDataType(axEdt, saveInfo);
             AddToProjectIfActive("AxEdt", req.ObjectName);
             return Ok("Created AxEdt '" + req.ObjectName + "'.");
@@ -702,6 +714,7 @@ namespace XppAiCopilotCompanion.MetaModel
         private MetaModelResult CreateEnum(CreateObjectRequest req, ModelSaveInfo saveInfo)
         {
             var axEnum = new AxEnum { Name = req.ObjectName };
+            ApplyEnumValuesFromXml(axEnum, req.MetadataXml);
             MetaService.CreateEnum(axEnum, saveInfo);
             AddToProjectIfActive("AxEnum", req.ObjectName);
             return Ok("Created AxEnum '" + req.ObjectName + "'.");
@@ -710,6 +723,7 @@ namespace XppAiCopilotCompanion.MetaModel
         private MetaModelResult CreateMenuItemDisplay(CreateObjectRequest req, ModelSaveInfo saveInfo)
         {
             var item = new AxMenuItemDisplay { Name = req.ObjectName };
+            ApplyMetadataXml(item, req.MetadataXml);
             MetaService.CreateMenuItemDisplay(item, saveInfo);
             AddToProjectIfActive("AxMenuItemDisplay", req.ObjectName);
             return Ok("Created AxMenuItemDisplay '" + req.ObjectName + "'.");
@@ -718,6 +732,7 @@ namespace XppAiCopilotCompanion.MetaModel
         private MetaModelResult CreateMenuItemOutput(CreateObjectRequest req, ModelSaveInfo saveInfo)
         {
             var item = new AxMenuItemOutput { Name = req.ObjectName };
+            ApplyMetadataXml(item, req.MetadataXml);
             MetaService.CreateMenuItemOutput(item, saveInfo);
             AddToProjectIfActive("AxMenuItemOutput", req.ObjectName);
             return Ok("Created AxMenuItemOutput '" + req.ObjectName + "'.");
@@ -726,6 +741,7 @@ namespace XppAiCopilotCompanion.MetaModel
         private MetaModelResult CreateMenuItemAction(CreateObjectRequest req, ModelSaveInfo saveInfo)
         {
             var item = new AxMenuItemAction { Name = req.ObjectName };
+            ApplyMetadataXml(item, req.MetadataXml);
             MetaService.CreateMenuItemAction(item, saveInfo);
             AddToProjectIfActive("AxMenuItemAction", req.ObjectName);
             return Ok("Created AxMenuItemAction '" + req.ObjectName + "'.");
@@ -734,6 +750,7 @@ namespace XppAiCopilotCompanion.MetaModel
         private MetaModelResult CreateQuery(CreateObjectRequest req, ModelSaveInfo saveInfo)
         {
             var axQuery = new AxQuerySimple { Name = req.ObjectName };
+            ApplyMetadataXml(axQuery, req.MetadataXml);
             MetaService.CreateQuery(axQuery, saveInfo);
             AddToProjectIfActive("AxQuery", req.ObjectName);
             return Ok("Created AxQuery '" + req.ObjectName + "'.");
@@ -743,8 +760,9 @@ namespace XppAiCopilotCompanion.MetaModel
         {
             var axView = new AxView { Name = req.ObjectName };
             if (!string.IsNullOrEmpty(req.Declaration))
-                axView.Declaration = req.Declaration;
+                axView.Declaration = StripCData(req.Declaration);
             AddMethods(axView.Methods, req.Methods);
+            ApplyMetadataXml(axView, req.MetadataXml);
             MetaService.CreateView(axView, saveInfo);
             AddToProjectIfActive("AxView", req.ObjectName);
             return Ok("Created AxView '" + req.ObjectName + "'.");
@@ -754,7 +772,8 @@ namespace XppAiCopilotCompanion.MetaModel
         {
             var entity = new AxDataEntityView { Name = req.ObjectName };
             if (!string.IsNullOrEmpty(req.Declaration))
-                entity.Declaration = req.Declaration;
+                entity.Declaration = StripCData(req.Declaration);
+            ApplyMetadataXml(entity, req.MetadataXml);
             MetaService.UpdateDataEntityView(entity, saveInfo);
             AddToProjectIfActive("AxDataEntityView", req.ObjectName);
             return Ok("Created AxDataEntityView '" + req.ObjectName + "'.");
@@ -763,6 +782,7 @@ namespace XppAiCopilotCompanion.MetaModel
         private MetaModelResult CreateSecurityPrivilege(CreateObjectRequest req, ModelSaveInfo saveInfo)
         {
             var priv = new AxSecurityPrivilege { Name = req.ObjectName };
+            ApplyMetadataXml(priv, req.MetadataXml);
             MetaService.CreateSecurityPrivilege(priv, saveInfo);
             AddToProjectIfActive("AxSecurityPrivilege", req.ObjectName);
             return Ok("Created AxSecurityPrivilege '" + req.ObjectName + "'.");
@@ -771,6 +791,7 @@ namespace XppAiCopilotCompanion.MetaModel
         private MetaModelResult CreateSecurityDuty(CreateObjectRequest req, ModelSaveInfo saveInfo)
         {
             var duty = new AxSecurityDuty { Name = req.ObjectName };
+            ApplyMetadataXml(duty, req.MetadataXml);
             MetaService.CreateSecurityDuty(duty, saveInfo);
             AddToProjectIfActive("AxSecurityDuty", req.ObjectName);
             return Ok("Created AxSecurityDuty '" + req.ObjectName + "'.");
@@ -779,6 +800,7 @@ namespace XppAiCopilotCompanion.MetaModel
         private MetaModelResult CreateSecurityRole(CreateObjectRequest req, ModelSaveInfo saveInfo)
         {
             var role = new AxSecurityRole { Name = req.ObjectName };
+            ApplyMetadataXml(role, req.MetadataXml);
             MetaService.CreateSecurityRole(role, saveInfo);
             AddToProjectIfActive("AxSecurityRole", req.ObjectName);
             return Ok("Created AxSecurityRole '" + req.ObjectName + "'.");
@@ -844,7 +866,7 @@ namespace XppAiCopilotCompanion.MetaModel
             if (saveInfo == null) return Fail("Cannot resolve model for '" + req.ObjectName + "'.");
 
             if (!string.IsNullOrEmpty(req.Declaration))
-                cls.Declaration = req.Declaration;
+                cls.Declaration = StripCData(req.Declaration);
 
             UpdateMethods(cls.Methods, req.Methods, req.RemoveMethodNames);
             MetaService.UpdateClass(cls, saveInfo);
@@ -861,7 +883,7 @@ namespace XppAiCopilotCompanion.MetaModel
             if (saveInfo == null) return Fail("Cannot resolve model for '" + req.ObjectName + "'.");
 
             if (!string.IsNullOrEmpty(req.Declaration))
-                tbl.Declaration = req.Declaration;
+                tbl.Declaration = StripCData(req.Declaration);
 
             UpdateMethods(tbl.Methods, req.Methods, req.RemoveMethodNames);
             ApplyMetadataXml(tbl, req.MetadataXml);
@@ -879,7 +901,7 @@ namespace XppAiCopilotCompanion.MetaModel
             if (saveInfo == null) return Fail("Cannot resolve model for '" + req.ObjectName + "'.");
 
             if (!string.IsNullOrEmpty(req.Declaration))
-                frm.SourceCode.Declaration = req.Declaration;
+                frm.SourceCode.Declaration = StripCData(req.Declaration);
 
             UpdateMethods(frm.Methods, req.Methods, req.RemoveMethodNames);
             MetaService.UpdateForm(frm, saveInfo);
@@ -908,6 +930,7 @@ namespace XppAiCopilotCompanion.MetaModel
             var saveInfo = GetModelSaveInfoForObject("AxEnum", req.ObjectName);
             if (saveInfo == null) return Fail("Cannot resolve model for '" + req.ObjectName + "'.");
 
+            ApplyEnumValuesFromXml(enm, req.MetadataXml);
             MetaService.UpdateEnum(enm, saveInfo);
             return Ok("Updated AxEnum '" + req.ObjectName + "'.");
         }
@@ -926,8 +949,9 @@ namespace XppAiCopilotCompanion.MetaModel
             foreach (string src in sources)
             {
                 if (string.IsNullOrWhiteSpace(src)) continue;
-                string name = ExtractMethodName(src);
-                target.Add(new AxMethod { Name = name, Source = src });
+                string clean = StripCData(src);
+                string name = ExtractMethodName(clean);
+                target.Add(new AxMethod { Name = name, Source = clean });
             }
         }
 
@@ -948,16 +972,17 @@ namespace XppAiCopilotCompanion.MetaModel
                 foreach (string src in upserts)
                 {
                     if (string.IsNullOrWhiteSpace(src)) continue;
-                    string name = ExtractMethodName(src);
+                    string clean = StripCData(src);
+                    string name = ExtractMethodName(clean);
                     var found = existing.FirstOrDefault(m =>
                         m.Name.Equals(name, StringComparison.OrdinalIgnoreCase));
                     if (found != null)
                     {
-                        found.Source = src;
+                        found.Source = clean;
                     }
                     else
                     {
-                        existing.Add(new AxMethod { Name = name, Source = src });
+                        existing.Add(new AxMethod { Name = name, Source = clean });
                     }
                 }
             }
@@ -1097,12 +1122,75 @@ namespace XppAiCopilotCompanion.MetaModel
             }
         }
 
+        /// <summary>
+        /// Parses metadataXml to extract AxEnumValue elements and adds them to the enum.
+        /// Accepts XML fragments like:
+        ///   &lt;EnumValues&gt;&lt;AxEnumValue&gt;&lt;Name&gt;Val&lt;/Name&gt;&lt;Value&gt;0&lt;/Value&gt;&lt;Label&gt;@LBL&lt;/Label&gt;&lt;/AxEnumValue&gt;&lt;/EnumValues&gt;
+        /// or just a list of AxEnumValue elements.
+        /// </summary>
+        private static void ApplyEnumValuesFromXml(AxEnum axEnum, string xml)
+        {
+            if (string.IsNullOrWhiteSpace(xml)) return;
+
+            try
+            {
+                // Wrap in a root element to ensure valid XML for parsing
+                string wrapped = "<Root>" + xml + "</Root>";
+                var doc = new XmlDocument();
+                doc.LoadXml(wrapped);
+
+                var valueNodes = doc.GetElementsByTagName("AxEnumValue");
+                int autoValue = 0;
+                // Determine the next auto-value based on existing values
+                foreach (var existing in axEnum.EnumValues)
+                {
+                    if (existing.Value >= autoValue)
+                        autoValue = existing.Value + 1;
+                }
+
+                foreach (XmlNode node in valueNodes)
+                {
+                    string name = node.SelectSingleNode("Name")?.InnerText;
+                    if (string.IsNullOrWhiteSpace(name)) continue;
+
+                    // Skip if value with same name already exists
+                    if (axEnum.EnumValues.Contains(name))
+                        continue;
+
+                    var enumValue = new AxEnumValue { Name = name };
+
+                    string valueStr = node.SelectSingleNode("Value")?.InnerText;
+                    if (!string.IsNullOrEmpty(valueStr) && int.TryParse(valueStr, out int val))
+                        enumValue.Value = val;
+                    else
+                        enumValue.Value = autoValue++;
+
+                    string label = node.SelectSingleNode("Label")?.InnerText;
+                    if (!string.IsNullOrEmpty(label))
+                        enumValue.Label = label;
+
+                    axEnum.EnumValues.Add(enumValue);
+                }
+            }
+            catch
+            {
+                // Best effort — if the XML can't be parsed, skip silently
+            }
+        }
+
         private void ApplyMetadataXml(object axObject, string xml)
         {
             if (axObject == null || string.IsNullOrWhiteSpace(xml))
                 return;
 
             var type = axObject.GetType();
+
+            // Handle enum values specially — collection properties can't be set via reflection
+            if (axObject is AxEnum axEnum)
+            {
+                ApplyEnumValuesFromXml(axEnum, xml);
+                return;
+            }
             string typeName = type.Name;
 
             string wrappedXml = BuildWrappedMetadataXml(typeName, axObject, xml);
@@ -1312,6 +1400,20 @@ namespace XppAiCopilotCompanion.MetaModel
                 if (child.NodeType == XmlNodeType.CDATA)
                     return child.Value ?? "";
             return node.InnerText ?? "";
+        }
+
+        /// <summary>
+        /// Strips CDATA wrappers from a string value. The MetaModel API adds its
+        /// own CDATA when serializing, so if the input already contains CDATA
+        /// wrappers the result would be double-wrapped and corrupted.
+        /// </summary>
+        private static string StripCData(string value)
+        {
+            if (string.IsNullOrEmpty(value)) return value;
+            string trimmed = value.Trim();
+            if (trimmed.StartsWith("<![CDATA[") && trimmed.EndsWith("]]>"))
+                return trimmed.Substring(9, trimmed.Length - 12);
+            return value;
         }
 
         private static MetaModelResult Ok(string message) =>

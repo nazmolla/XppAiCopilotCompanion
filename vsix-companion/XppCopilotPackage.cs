@@ -25,6 +25,13 @@ namespace XppAiCopilotCompanion
         public static XppCopilotPackage Instance { get; private set; }
         private System.Diagnostics.Process _mcpServerProcess;
         private MetaModelBridgeServer _bridgeServer;
+        private MetaModel.MetaModelBridge _metaModelBridge;
+
+        /// <summary>
+        /// The shared MetaModelBridge instance used for all metadata operations.
+        /// Available after package initialization.
+        /// </summary>
+        internal MetaModel.IMetaModelBridge MetaModelBridge => _metaModelBridge;
 
     // Must match ServerVersion in mcp-server/Program.cs.
     // When the server exe is updated, bump this to force stale cached
@@ -132,13 +139,31 @@ namespace XppAiCopilotCompanion
                 }
 
                 string defaultMcpUrl = "http://127.0.0.1:21329/";
+                string stableDir = Path.Combine(
+                    Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
+                    "XppCopilotCompanion");
+                string stableMcpExePath = Path.Combine(stableDir, "XppMcpServer.exe");
+
+                // If an MCP process is running from an unexpected location (for example,
+                // a manually launched debug build), kill it so VS always uses the
+                // extension-owned binary and tool catalog.
+                bool hadUnexpectedProcess = KillUnexpectedMcpProcesses(
+                    new HashSet<string>(StringComparer.OrdinalIgnoreCase)
+                    {
+                        stableMcpExePath,
+                        shippedExePath
+                    },
+                    report);
 
                 // Fast alive-check: if a server is already running and has ALL expected tools, skip kill/copy/start.
                 // This prevents the circular-kill problem when something triggers a second registration.
                 bool serverAlreadyAlive = false;
                 try
                 {
-                    bool aliveOk = ProbeMcpHttp(defaultMcpUrl, out string aliveDetails);
+                    string aliveDetails = hadUnexpectedProcess
+                        ? "Skipped probe after killing unexpected MCP process."
+                        : string.Empty;
+                    bool aliveOk = !hadUnexpectedProcess && ProbeMcpHttp(defaultMcpUrl, out aliveDetails);
                     if (aliveOk)
                     {
                         serverAlreadyAlive = true;
@@ -203,9 +228,6 @@ namespace XppAiCopilotCompanion
                     }
 
                     // NOW copy exe to stable path (old process is dead, file is unlocked)
-                    string stableDir = Path.Combine(
-                        Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
-                        "XppCopilotCompanion");
                     Directory.CreateDirectory(stableDir);
                     string mcpExePath = Path.Combine(stableDir, "XppMcpServer.exe");
                     try
@@ -241,6 +263,12 @@ namespace XppAiCopilotCompanion
                     string cleanResult = CleanStaleMcpConfig(stale);
                     report.AppendLine(stale + " => " + cleanResult);
                 }
+
+                // Purge VS Copilot MCP cache so it re-discovers tools fresh.
+                // Without this, switching solutions can show stale/missing tools.
+                int cacheDeleted = CleanVsCopilotMcpCache(report);
+                if (cacheDeleted > 0)
+                    report.AppendLine("Purged " + cacheDeleted + " stale VS Copilot MCP cache file(s).");
 
                 // Write .mcp.json pointing to HTTP URL
                 string expectedJson = BuildMcpConfigJson(mcpUrl);
@@ -402,43 +430,12 @@ namespace XppAiCopilotCompanion
 
         private IEnumerable<string> GetMcpConfigCandidatePaths()
         {
-            // Official VS MCP discovery locations per:
-            // https://learn.microsoft.com/en-us/visualstudio/ide/mcp-servers
-            var result = new List<string>();
             string userHome = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
 
-            // 1. %USERPROFILE%\.mcp.json — global, all solutions
-            result.Add(Path.Combine(userHome, ".mcp.json"));
-            // 2. %USERPROFILE%\mcp.json — compatibility variant used in some setups
-            result.Add(Path.Combine(userHome, "mcp.json"));
-
-            ThreadHelper.ThrowIfNotOnUIThread();
-            var dte = GetService(typeof(DTE)) as DTE;
-            string slnPath = dte?.Solution?.FullName;
-            if (!string.IsNullOrWhiteSpace(slnPath))
-            {
-                string slnDir = Path.GetDirectoryName(slnPath);
-                if (!string.IsNullOrWhiteSpace(slnDir))
-                {
-                    // 3. <SOLUTIONDIR>\.vs\mcp.json — per-user, per-solution
-                    string vsDir = Path.Combine(slnDir, ".vs");
-                    result.Add(Path.Combine(vsDir, "mcp.json"));
-                    // 4. <SOLUTIONDIR>\.vs\.mcp.json — compatibility variant
-                    result.Add(Path.Combine(vsDir, ".mcp.json"));
-
-                    // 5. <SOLUTIONDIR>\.mcp.json — solution-level, source-controllable
-                    result.Add(Path.Combine(slnDir, ".mcp.json"));
-                    // 6. <SOLUTIONDIR>\mcp.json — compatibility variant
-                    result.Add(Path.Combine(slnDir, "mcp.json"));
-
-                    // 7. <SOLUTIONDIR>\.vscode\mcp.json — shared with VS Code ecosystem
-                    result.Add(Path.Combine(slnDir, ".vscode", "mcp.json"));
-                    // 8. <SOLUTIONDIR>\.cursor\mcp.json — shared with Cursor ecosystem
-                    result.Add(Path.Combine(slnDir, ".cursor", "mcp.json"));
-                }
-            }
-
-            return result;
+            // Canonical location only.
+            // Writing one file avoids duplicate-server collisions across scopes,
+            // which can prevent tools from surfacing in the VS picker.
+            return new[] { Path.Combine(userHome, ".mcp.json") };
         }
 
         /// <summary>
@@ -448,11 +445,45 @@ namespace XppAiCopilotCompanion
         private static IEnumerable<string> GetStaleMcpConfigPaths()
         {
             string userHome = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
-            return new[]
+            var result = new List<string>
             {
+                // Legacy compatibility path.
+                Path.Combine(userHome, "mcp.json"),
+
+                // Wrong ecosystem-specific locations written by older builds.
                 Path.Combine(userHome, ".vscode", "mcp.json"),
                 Path.Combine(userHome, ".vscode", ".mcp.json"),
+                Path.Combine(userHome, ".cursor", "mcp.json"),
             };
+
+            try
+            {
+                // Also clean duplicates under the active solution to avoid
+                // conflicting definitions of the same server id.
+                ThreadHelper.ThrowIfNotOnUIThread();
+                var dte = Instance?.GetService(typeof(DTE)) as DTE;
+                string slnPath = dte?.Solution?.FullName;
+                if (!string.IsNullOrWhiteSpace(slnPath))
+                {
+                    string slnDir = Path.GetDirectoryName(slnPath);
+                    if (!string.IsNullOrWhiteSpace(slnDir))
+                    {
+                        string vsDir = Path.Combine(slnDir, ".vs");
+                        result.Add(Path.Combine(vsDir, "mcp.json"));
+                        result.Add(Path.Combine(vsDir, ".mcp.json"));
+                        result.Add(Path.Combine(slnDir, ".mcp.json"));
+                        result.Add(Path.Combine(slnDir, "mcp.json"));
+                        result.Add(Path.Combine(slnDir, ".vscode", "mcp.json"));
+                        result.Add(Path.Combine(slnDir, ".cursor", "mcp.json"));
+                    }
+                }
+            }
+            catch
+            {
+                // Best-effort cleanup list; ignore DTE unavailability.
+            }
+
+            return result;
         }
 
         private static string CleanStaleMcpConfig(string path)
@@ -475,6 +506,51 @@ namespace XppAiCopilotCompanion
             {
                 return "cleanup failed: " + ex.Message;
             }
+        }
+
+        /// <summary>
+        /// Deletes VS Copilot MCP cache files that contain our server name.
+        /// Cache lives at %LOCALAPPDATA%\Microsoft\VisualStudio\Copilot\McpServers\*.cache.
+        /// VS recreates these on the next tools/list round-trip, so deleting is safe
+        /// and forces VS to re-discover the current tool set from the live server.
+        /// </summary>
+        private static int CleanVsCopilotMcpCache(StringBuilder report)
+        {
+            int deleted = 0;
+            try
+            {
+                string cacheDir = Path.Combine(
+                    Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
+                    "Microsoft", "VisualStudio", "Copilot", "McpServers");
+
+                if (!Directory.Exists(cacheDir))
+                    return 0;
+
+                foreach (string file in Directory.GetFiles(cacheDir, "*.cache"))
+                {
+                    try
+                    {
+                        // Binary MessagePack files — search raw bytes for our server id.
+                        byte[] raw = File.ReadAllBytes(file);
+                        string text = System.Text.Encoding.UTF8.GetString(raw);
+                        if (text.IndexOf("xpp", StringComparison.OrdinalIgnoreCase) >= 0)
+                        {
+                            File.Delete(file);
+                            report.AppendLine("Cache purged: " + Path.GetFileName(file));
+                            deleted++;
+                        }
+                    }
+                    catch (Exception ex)
+                    {
+                        report.AppendLine("Cache cleanup failed (" + Path.GetFileName(file) + "): " + ex.Message);
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                report.AppendLine("VS Copilot cache cleanup error: " + ex.Message);
+            }
+            return deleted;
         }
 
         private static string UpsertMcpConfig(string configPath, string expectedJson, object _unused)
@@ -509,6 +585,36 @@ namespace XppAiCopilotCompanion
                 + "    }\n"
                 + "  }\n"
                 + "}\n";
+        }
+
+        private static bool KillUnexpectedMcpProcesses(HashSet<string> expectedExePaths, StringBuilder report)
+        {
+            bool killedAny = false;
+            try
+            {
+                foreach (var p in System.Diagnostics.Process.GetProcessesByName("XppMcpServer"))
+                {
+                    try
+                    {
+                        string path = null;
+                        try { path = p.MainModule?.FileName; } catch { }
+
+                        bool expected = !string.IsNullOrWhiteSpace(path) && expectedExePaths.Contains(path);
+                        if (!expected)
+                        {
+                            report.AppendLine("Killing unexpected MCP process pid=" + p.Id + " path=" + (path ?? "<unknown>"));
+                            p.Kill();
+                            p.WaitForExit(2000);
+                            killedAny = true;
+                        }
+                    }
+                    catch { }
+                    finally { p.Dispose(); }
+                }
+            }
+            catch { }
+
+            return killedAny;
         }
 
         private string StartMcpHttpServer(string exePath, out string details)
@@ -670,8 +776,8 @@ namespace XppAiCopilotCompanion
         {
             try
             {
-                var bridge = new MetaModelBridge();
-                _bridgeServer = new MetaModelBridgeServer(bridge);
+                _metaModelBridge = new MetaModel.MetaModelBridge();
+                _bridgeServer = new MetaModelBridgeServer(_metaModelBridge);
                 _bridgeServer.Start();
                 System.Diagnostics.Debug.WriteLine("[XppCopilot] MetaModel bridge started.");
             }

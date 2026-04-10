@@ -5,8 +5,7 @@ namespace XppAiCopilotCompanion.McpServer
 {
     /// <summary>
     /// Routes MCP tool calls to the MetaModel bridge running inside the VSIX.
-    /// Falls back to local XML-based operations only when the bridge is unavailable
-    /// and the operation is read-only (xpp_read_object, xpp_search_docs).
+    /// All metadata operations go through the strongly-typed MetaModel API.
     /// </summary>
     internal sealed class ToolRouter
     {
@@ -25,7 +24,7 @@ namespace XppAiCopilotCompanion.McpServer
   ""tools"": [
     {
       ""name"": ""xpp_create_object"",
-      ""description"": ""Creates a new D365FO X++ metadata object using the MetaModel API. Supports: AxClass, AxTable, AxForm, AxEdt, AxEnum, AxMenuItemDisplay/Output/Action, AxQuery, AxView, AxDataEntityView, AxSecurityPrivilege/Duty/Role, AxService, AxServiceGroup, AxMap, AxMenu, AxTile, AxConfigurationKey. The object is automatically added to the active VS project."",
+      ""description"": ""Creates a new D365FO X++ metadata object using the MetaModel API. CRITICAL: This is the ONLY correct way to create X++ objects. NEVER create metadata XML files directly via terminal, file writes, or Set-Content — that bypasses the MetaModel API and produces corrupted/unregistered objects. Supports: AxClass, AxTable, AxForm, AxEdt, AxEnum, AxMenuItemDisplay/Output/Action, AxQuery, AxView, AxDataEntityView, AxSecurityPrivilege/Duty/Role, AxService, AxServiceGroup, AxMap, AxMenu, AxTile, AxConfigurationKey. The object is automatically added to the active VS project."",
       ""inputSchema"": {
         ""type"": ""object"",
         ""properties"": {
@@ -35,9 +34,9 @@ namespace XppAiCopilotCompanion.McpServer
             ""enum"": [""AxClass"", ""AxTable"", ""AxView"", ""AxDataEntityView"", ""AxMap"", ""AxEdt"", ""AxEnum"", ""AxForm"", ""AxTile"", ""AxMenu"", ""AxMenuItemDisplay"", ""AxMenuItemOutput"", ""AxMenuItemAction"", ""AxQuery"", ""AxSecurityPrivilege"", ""AxSecurityDuty"", ""AxSecurityRole"", ""AxService"", ""AxServiceGroup"", ""AxConfigurationKey""]
           },
           ""objectName"": { ""type"": ""string"", ""description"": ""Name of the object. Must follow the model's naming prefix convention."" },
-          ""declaration"": { ""type"": ""string"", ""description"": ""X++ class/table declaration code block."" },
-          ""methods"": { ""type"": ""array"", ""items"": { ""type"": ""string"" }, ""description"": ""Array of complete X++ method source strings."" },
-          ""metadataXml"": { ""type"": ""string"", ""description"": ""Optional XML fragment for structural metadata (fields, indexes, relations, etc.)."" },
+          ""declaration"": { ""type"": ""string"", ""description"": ""Raw X++ class/table declaration code block. Do NOT wrap in CDATA — the API handles that automatically."" },
+          ""methods"": { ""type"": ""array"", ""items"": { ""type"": ""string"" }, ""description"": ""Array of complete X++ method source strings. Raw code only, no CDATA wrappers."" },
+          ""metadataXml"": { ""type"": ""string"", ""description"": ""XML fragment for structural metadata. REQUIRED for AxEnum (enum values), AxTable (fields, field groups, indexes, relations), AxQuery (data sources), AxMenuItemDisplay/Output/Action (properties), AxEdt (properties), AxSecurityPrivilege/Duty/Role (entry points). For AxEnum, use: <EnumValues><AxEnumValue><Name>ValueName</Name><Value>0</Value><Label>@LabelId</Label></AxEnumValue></EnumValues>. For AxTable fields, use: <Fields><AxTableFieldString><Name>FieldName</Name><ExtendedDataType>EdtName</ExtendedDataType></AxTableFieldString></Fields>. NEVER omit this for enums or tables — objects without metadata are empty shells."" },
           ""modelName"": { ""type"": ""string"", ""description"": ""Target model name. If omitted, uses the active project's model."" }
         },
         ""required"": [""objectType"", ""objectName""]
@@ -45,7 +44,7 @@ namespace XppAiCopilotCompanion.McpServer
     },
     {
       ""name"": ""xpp_read_object"",
-      ""description"": ""Reads a D365FO X++ object by type and name using the MetaModel API. Returns declaration, methods, metadata, model name, and whether the object is in a custom (editable) or standard (read-only) model. For objects not supported by the typed API, pass filePath instead."",
+      ""description"": ""Reads a D365FO X++ object by type and name using the MetaModel API. CRITICAL: This is the ONLY correct way to read X++ objects. NEVER read metadata XML files directly via Get-Content or terminal commands. Returns declaration, methods, metadata, model name, and whether the object is in a custom (editable) or standard (read-only) model. For objects not supported by the typed API, pass filePath instead."",
       ""inputSchema"": {
         ""type"": ""object"",
         ""properties"": {
@@ -58,14 +57,14 @@ namespace XppAiCopilotCompanion.McpServer
     },
     {
       ""name"": ""xpp_update_object"",
-      ""description"": ""Updates an existing D365FO X++ object using the MetaModel API. Can update declaration, add/replace/remove methods. ONLY works on custom model objects."",
+      ""description"": ""Updates an existing D365FO X++ object using the MetaModel API. CRITICAL: This is the ONLY correct way to modify X++ objects. NEVER edit metadata XML files directly. Can update declaration, add/replace/remove methods. ONLY works on custom model objects."",
       ""inputSchema"": {
         ""type"": ""object"",
         ""properties"": {
           ""objectType"": { ""type"": ""string"", ""description"": ""The object type (AxClass, AxTable, AxForm, AxEdt, AxEnum)."" },
           ""objectName"": { ""type"": ""string"", ""description"": ""The object name to update."" },
-          ""declaration"": { ""type"": ""string"", ""description"": ""New declaration code. Replaces existing."" },
-          ""methods"": { ""type"": ""array"", ""items"": { ""type"": ""string"" }, ""description"": ""Methods to add or replace (matched by name)."" },
+          ""declaration"": { ""type"": ""string"", ""description"": ""New raw X++ declaration code. Replaces existing. No CDATA wrappers."" },
+          ""methods"": { ""type"": ""array"", ""items"": { ""type"": ""string"" }, ""description"": ""Methods to add or replace (matched by name). Raw X++ code only, no CDATA."" },
           ""removeMethodNames"": { ""type"": ""array"", ""items"": { ""type"": ""string"" }, ""description"": ""Method names to remove."" },
           ""metadataXml"": { ""type"": ""string"", ""description"": ""New metadata XML fragment."" }
         },
@@ -87,7 +86,7 @@ namespace XppAiCopilotCompanion.McpServer
     },
     {
       ""name"": ""xpp_find_object"",
-      ""description"": ""Searches for D365FO metadata objects by name across ALL loaded models and packages using the MetaModel API. Returns matching objects with type, model, and editability."",
+      ""description"": ""Searches for D365FO metadata objects by name across ALL loaded models and packages using the MetaModel API. CRITICAL: Always use this instead of Get-ChildItem/dir/file searches on metadata folders. NEVER search the file system for X++ objects. Returns matching objects with type, model, and editability."",
       ""inputSchema"": {
         ""type"": ""object"",
         ""properties"": {
@@ -100,16 +99,16 @@ namespace XppAiCopilotCompanion.McpServer
     },
     {
       ""name"": ""xpp_list_objects"",
-      ""description"": ""Lists D365FO metadata objects, optionally filtered by model, type, and name pattern. Uses the MetaModel API to enumerate all known objects."",
+      ""description"": ""Lists D365FO metadata objects filtered by name pattern. CRITICAL: Always use this instead of Get-ChildItem/dir/file searches on metadata folders. NEVER search the file system for X++ objects. Always provide nameFilter (substring match) and objectType to avoid slow full scans. Returns matching object names, types, and models."",
       ""inputSchema"": {
         ""type"": ""object"",
         ""properties"": {
+          ""nameFilter"": { ""type"": ""string"", ""description"": ""Required. Substring to match object names (case-insensitive). Example: 'CustTable', 'SalesOrder'."" },
+          ""objectType"": { ""type"": ""string"", ""description"": ""Strongly recommended. Filter by type: AxClass, AxTable, AxForm, AxEnum, AxView, AxQuery, AxEdt, AxMenuItemDisplay, AxMenuItemOutput, AxMenuItemAction."" },
           ""modelName"": { ""type"": ""string"", ""description"": ""Filter by model name."" },
-          ""objectType"": { ""type"": ""string"", ""description"": ""Filter by type (AxClass, AxTable, etc.)."" },
-          ""nameFilter"": { ""type"": ""string"", ""description"": ""Filter names by substring (case-insensitive)."" },
           ""maxResults"": { ""type"": ""integer"", ""description"": ""Max results. Default 100."" }
         },
-        ""required"": []
+        ""required"": [""nameFilter""]
       }
     },
     {
@@ -185,7 +184,7 @@ namespace XppAiCopilotCompanion.McpServer
     },
     {
       ""name"": ""xpp_get_environment"",
-      ""description"": ""Returns the D365FO development environment info: metadata folders, active project, active model name/ID/layer."",
+      ""description"": ""Returns the D365FO development environment info: metadata folders, active project, active model name/ID/layer. Use this to understand the project context. CRITICAL RULE: In D365FO/X++ projects, NEVER use terminal commands to create, read, update, search, or list metadata XML files. Always use the xpp_* tools — they use the MetaModel API which correctly registers objects, maintains cross-references, and respects model boundaries."",
       ""inputSchema"": {
         ""type"": ""object"",
         ""properties"": {},
@@ -258,8 +257,25 @@ namespace XppAiCopilotCompanion.McpServer
 
             // Parse bridge response and format as MCP tool result
             string success = JsonHelpers.ExtractJsonString(bridgeResponse, "success");
+            string successToken = JsonHelpers.ExtractJsonValueToken(bridgeResponse, "success");
             string message = JsonHelpers.ExtractJsonString(bridgeResponse, "message");
-            bool isError = !"true".Equals(success, StringComparison.OrdinalIgnoreCase);
+
+            // Bridge returns success as JSON boolean (true/false), while older
+            // paths may return string values. Support both to avoid marking
+            // successful bridge calls as MCP errors.
+            bool isSuccess = false;
+            if (!string.IsNullOrWhiteSpace(success))
+            {
+              isSuccess = "true".Equals(success, StringComparison.OrdinalIgnoreCase);
+            }
+            else if (!string.IsNullOrWhiteSpace(successToken))
+            {
+              string token = successToken.Trim();
+              if (token.StartsWith("\"") && token.EndsWith("\"") && token.Length >= 2)
+                token = token.Substring(1, token.Length - 2);
+              isSuccess = "true".Equals(token, StringComparison.OrdinalIgnoreCase);
+            }
+            bool isError = !isSuccess;
 
             // For rich results, pass through relevant data
             var sb = new StringBuilder();

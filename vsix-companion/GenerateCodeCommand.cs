@@ -43,7 +43,14 @@ namespace XppAiCopilotCompanion
             var adapter = new CopilotContextProviderAdapter(bridge, vs);
             var controller = new XppCopilotUiController(adapter, vs);
             var ai = new CopilotLanguageModelService(vs);
-            var objectCreator = new XppObjectCreationService(vs);
+            var metaBridge = XppCopilotPackage.Instance?.MetaModelBridge;
+            if (metaBridge == null)
+            {
+                VsShellUtilities.ShowMessageBox(_package, "MetaModel bridge not available. Ensure the extension is fully loaded.", "X++ AI Error",
+                    OLEMSGICON.OLEMSGICON_WARNING, OLEMSGBUTTON.OLEMSGBUTTON_OK, OLEMSGDEFBUTTON.OLEMSGDEFBUTTON_FIRST);
+                return;
+            }
+            var objectCreator = new MetaModelObjectCreationService(metaBridge);
             var workflow = new XppCopilotWorkflowService(controller, ai, objectCreator);
 
             try

@@ -245,6 +245,11 @@ namespace XppAiCopilotCompanion.MetaModel
             string maxStr = ExtractJsonString(body, "maxResults");
             int maxResults = 100;
             if (!string.IsNullOrEmpty(maxStr)) int.TryParse(maxStr, out maxResults);
+
+            // Require nameFilter to prevent full metadata scans that time out
+            if (string.IsNullOrWhiteSpace(nameFilter))
+                return "{\"success\":false,\"message\":\"nameFilter is required. Provide a substring to search for (e.g. 'CustTable').\",\"objects\":[]}";
+
             var result = _bridge.ListObjects(modelName, objectType, nameFilter, maxResults);
 
             var sb = new StringBuilder();

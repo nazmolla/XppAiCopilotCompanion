@@ -4,7 +4,7 @@ VisualStudioVersion = 17.5.2.0
 MinimumVisualStudioVersion = 10.0.40219.1
 Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "vsix-companion", "vsix-companion", "{F76E922E-A1F2-CAE6-0AA9-2E25532196AB}"
 EndProject
-Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "XppAiCopilotCompanion", "vsix-companion\XppAiCopilotCompanion.csproj", "{3399D3B5-F0E6-200F-CCCC-0E37C4FA7400}"
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "XppAiCopilotCompanion", "vsix-companion\XppAiCopilotCompanion.csproj", "{B8E3F1A0-7C24-4D5B-9E1F-2A3B4C5D6E7F}"
 EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
@@ -12,16 +12,16 @@ Global
 		Release|Any CPU = Release|Any CPU
 	EndGlobalSection
 	GlobalSection(ProjectConfigurationPlatforms) = postSolution
-		{3399D3B5-F0E6-200F-CCCC-0E37C4FA7400}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
-		{3399D3B5-F0E6-200F-CCCC-0E37C4FA7400}.Debug|Any CPU.Build.0 = Debug|Any CPU
-		{3399D3B5-F0E6-200F-CCCC-0E37C4FA7400}.Release|Any CPU.ActiveCfg = Release|Any CPU
-		{3399D3B5-F0E6-200F-CCCC-0E37C4FA7400}.Release|Any CPU.Build.0 = Release|Any CPU
+		{B8E3F1A0-7C24-4D5B-9E1F-2A3B4C5D6E7F}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{B8E3F1A0-7C24-4D5B-9E1F-2A3B4C5D6E7F}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{B8E3F1A0-7C24-4D5B-9E1F-2A3B4C5D6E7F}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{B8E3F1A0-7C24-4D5B-9E1F-2A3B4C5D6E7F}.Release|Any CPU.Build.0 = Release|Any CPU
 	EndGlobalSection
 	GlobalSection(SolutionProperties) = preSolution
 		HideSolutionNode = FALSE
 	EndGlobalSection
 	GlobalSection(NestedProjects) = preSolution
-		{3399D3B5-F0E6-200F-CCCC-0E37C4FA7400} = {F76E922E-A1F2-CAE6-0AA9-2E25532196AB}
+		{B8E3F1A0-7C24-4D5B-9E1F-2A3B4C5D6E7F} = {F76E922E-A1F2-CAE6-0AA9-2E25532196AB}
 	EndGlobalSection
 	GlobalSection(ExtensibilityGlobals) = postSolution
 		SolutionGuid = {D9DF62A6-400B-4732-BC96-0908679DB2EA}
