@@ -4,6 +4,7 @@ using System.IO;
 using System.Linq;
 using System.Text;
 using System.Xml;
+using System.Xml.Serialization;
 using Microsoft.Dynamics.AX.Metadata.MetaModel;
 using Microsoft.Dynamics.AX.Metadata.Service;
 using Microsoft.Dynamics.Framework.Tools.Extensibility;
@@ -495,12 +496,7 @@ namespace XppAiCopilotCompanion.MetaModel
                 {
                     if (controller.Exists(labelId))
                     {
-                        // LabelEditorController API shape differs by platform version.
-                        // Resolve GetLabelText via reflection to keep compatibility.
-                        string text = string.Empty;
-                        var getLabelTextMethod = controller.GetType().GetMethod("GetLabelText", new[] { typeof(string) });
-                        if (getLabelTextMethod != null)
-                            text = getLabelTextMethod.Invoke(controller, new object[] { labelId }) as string;
+                        string text = TryGetLabelText(controller, labelId);
                         result.Labels.Add(new LabelEntry { Id = labelId, Text = text });
                     }
                     else
@@ -510,8 +506,13 @@ namespace XppAiCopilotCompanion.MetaModel
                     return result;
                 }
 
-                // TODO: enumerate labels with search/filter when API supports it
-                result.Message = "Label enumeration retrieved via controller for " + labelFileId;
+                var labels = TrySearchLabels(controller, searchText, maxResults);
+                foreach (var entry in labels)
+                    result.Labels.Add(entry);
+
+                result.Message = result.Labels.Count > 0
+                    ? "Retrieved " + result.Labels.Count + " labels from " + labelFileId + "."
+                    : "No labels found in " + labelFileId + ".";
                 return result;
             }
             catch (Exception ex)
@@ -1098,16 +1099,180 @@ namespace XppAiCopilotCompanion.MetaModel
 
         private void ApplyMetadataXml(object axObject, string xml)
         {
-            // MetadataXml is used as a hint for the tool caller but actual property
-            // setting should use the strongly-typed API. This is a placeholder —
-            // the typed properties on AxTable (Fields, Indexes, Relations, etc.)
-            // should be set directly by the caller if needed.
+            if (axObject == null || string.IsNullOrWhiteSpace(xml))
+                return;
+
+            var type = axObject.GetType();
+            string typeName = type.Name;
+
+            string wrappedXml = BuildWrappedMetadataXml(typeName, axObject, xml);
+            object parsed = DeserializeMetadataObject(type, wrappedXml);
+            if (parsed == null)
+                return;
+
+            CopyMetadataProperties(parsed, axObject);
         }
 
         private string SerializeMetadata(object axObject)
         {
-            // TODO: Use Metadata.Storage serializer to get XML representation
-            return null;
+            if (axObject == null)
+                return null;
+
+            try
+            {
+                var serializer = new XmlSerializer(axObject.GetType());
+                using (var sw = new StringWriter())
+                {
+                    serializer.Serialize(sw, axObject);
+                    return sw.ToString();
+                }
+            }
+            catch
+            {
+                return null;
+            }
+        }
+
+        private static string BuildWrappedMetadataXml(string typeName, object axObject, string xml)
+        {
+            string trimmed = xml.Trim();
+            if (trimmed.StartsWith("<" + typeName, StringComparison.Ordinal))
+                return trimmed;
+
+            string name = axObject.GetType().GetProperty("Name")?.GetValue(axObject) as string;
+            if (string.IsNullOrEmpty(name))
+                name = "Temp";
+
+            return "<" + typeName + ">"
+                + "<Name>" + System.Security.SecurityElement.Escape(name) + "</Name>"
+                + trimmed
+                + "</" + typeName + ">";
+        }
+
+        private static object DeserializeMetadataObject(Type type, string xml)
+        {
+            try
+            {
+                var serializer = new XmlSerializer(type);
+                using (var sr = new StringReader(xml))
+                    return serializer.Deserialize(sr);
+            }
+            catch
+            {
+                return null;
+            }
+        }
+
+        private static void CopyMetadataProperties(object source, object target)
+        {
+            var excluded = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
+            {
+                "Name", "SourceCode", "Methods", "UnparsableSource", "Attributes", "Members"
+            };
+
+            var props = source.GetType().GetProperties();
+            foreach (var prop in props)
+            {
+                if (!prop.CanRead || !prop.CanWrite)
+                    continue;
+                if (excluded.Contains(prop.Name))
+                    continue;
+
+                try
+                {
+                    var value = prop.GetValue(source);
+                    prop.SetValue(target, value);
+                }
+                catch
+                {
+                    // Best effort: continue copying remaining properties.
+                }
+            }
+        }
+
+        private static string TryGetLabelText(object controller, string labelId)
+        {
+            try
+            {
+                var method = controller.GetType().GetMethod("GetLabelText", new[] { typeof(string) });
+                if (method == null) return string.Empty;
+                return method.Invoke(controller, new object[] { labelId }) as string ?? string.Empty;
+            }
+            catch
+            {
+                return string.Empty;
+            }
+        }
+
+        private static IEnumerable<LabelEntry> TrySearchLabels(object controller, string searchText, int maxResults)
+        {
+            var results = new List<LabelEntry>();
+            int limit = maxResults > 0 ? maxResults : 50;
+
+            // Prefer text search when available.
+            foreach (string methodName in new[] { "SearchByText", "SearchById", "GetAll" })
+            {
+                try
+                {
+                    var method = controller.GetType().GetMethod(methodName);
+                    if (method == null) continue;
+
+                    object raw;
+                    if (method.GetParameters().Length == 1)
+                    {
+                        string arg = string.IsNullOrEmpty(searchText) ? "" : searchText;
+                        raw = method.Invoke(controller, new object[] { arg });
+                    }
+                    else if (method.GetParameters().Length == 0)
+                    {
+                        raw = method.Invoke(controller, null);
+                    }
+                    else
+                    {
+                        continue;
+                    }
+
+                    if (raw is System.Collections.IEnumerable seq)
+                    {
+                        foreach (var item in seq)
+                        {
+                            if (item == null) continue;
+                            string id = item.GetType().GetProperty("Id")?.GetValue(item)?.ToString();
+                            string text = item.GetType().GetProperty("Text")?.GetValue(item)?.ToString();
+                            if (string.IsNullOrEmpty(id))
+                            {
+                                id = item.GetType().GetProperty("LabelId")?.GetValue(item)?.ToString();
+                            }
+                            if (string.IsNullOrEmpty(text))
+                            {
+                                text = item.GetType().GetProperty("LabelText")?.GetValue(item)?.ToString();
+                            }
+
+                            if (!string.IsNullOrEmpty(searchText) && !string.IsNullOrEmpty(text)
+                                && text.IndexOf(searchText, StringComparison.OrdinalIgnoreCase) < 0
+                                && (id == null || id.IndexOf(searchText, StringComparison.OrdinalIgnoreCase) < 0))
+                            {
+                                continue;
+                            }
+
+                            if (!string.IsNullOrEmpty(id))
+                                results.Add(new LabelEntry { Id = id, Text = text ?? string.Empty });
+
+                            if (results.Count >= limit)
+                                return results;
+                        }
+                    }
+
+                    if (results.Count > 0)
+                        return results;
+                }
+                catch
+                {
+                    // Try next supported API shape.
+                }
+            }
+
+            return results;
         }
 
         private bool IsCustomModel(string modelName)
