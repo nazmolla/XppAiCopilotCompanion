@@ -26,6 +26,11 @@ namespace XppAiCopilotCompanion
         private System.Diagnostics.Process _mcpServerProcess;
         private MetaModelBridgeServer _bridgeServer;
 
+    // Must match ServerVersion in mcp-server/Program.cs.
+    // When the server exe is updated, bump this to force stale cached
+    // processes to be killed and replaced with the new binary.
+    private const string ExpectedMcpServerVersion = "0.4.0";
+
         protected override async Task InitializeAsync(
             CancellationToken cancellationToken,
             IProgress<ServiceProgressData> progress)
@@ -54,19 +59,40 @@ namespace XppAiCopilotCompanion
 
         private async Task TouchMcpConfigsAfterDelayAsync()
         {
-            await Task.Delay(15000);
-            await JoinableTaskFactory.SwitchToMainThreadAsync();
-            try
+            // Rewrite the MCP config files at several points after startup so that
+            // VS Copilot's FileSystemWatcher receives a real content-Changed event
+            // and (re-)connects to the server.  Using File.SetLastWriteTimeUtc alone
+            // does not reliably trigger the watcher on all VS versions; writing the
+            // actual content does.  We retry three times to handle slow machines
+            // where the server may not be fully up on the first attempt.
+            foreach (int waitMs in new[] { 20_000, 25_000, 45_000 })
             {
-                foreach (string path in GetMcpConfigCandidatePaths())
+                await Task.Delay(waitMs);
+                await JoinableTaskFactory.SwitchToMainThreadAsync();
+                try
                 {
-                    if (File.Exists(path))
+                    // Resolve the actual running port from the port file.
+                    string portFile = Path.Combine(
+                        Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
+                        "XppCopilotCompanion", "mcp-port.txt");
+                    string mcpUrl = "http://127.0.0.1:21329/";
+                    if (File.Exists(portFile))
                     {
-                        File.SetLastWriteTimeUtc(path, DateTime.UtcNow);
+                        string portText = File.ReadAllText(portFile).Trim();
+                        int port;
+                        if (int.TryParse(portText, out port) && port > 0)
+                            mcpUrl = "http://127.0.0.1:" + port + "/";
+                    }
+
+                    string expectedJson = BuildMcpConfigJson(mcpUrl);
+                    foreach (string path in GetMcpConfigCandidatePaths())
+                    {
+                        if (File.Exists(path))
+                            File.WriteAllText(path, expectedJson);
                     }
                 }
+                catch { }
             }
-            catch { }
         }
 
         /// <summary>
@@ -479,7 +505,6 @@ namespace XppAiCopilotCompanion
                 + "  \"servers\": {\n"
                 + "    \"xpp-copilot-companion\": {\n"
                 + "      \"type\": \"http\",\n"
-                + "      \"transport\": \"http\",\n"
                 + "      \"url\": \"" + mcpUrl + "\"\n"
                 + "    }\n"
                 + "  }\n"
@@ -567,17 +592,49 @@ namespace XppAiCopilotCompanion
                     client.Encoding = Encoding.UTF8;
                     client.Headers[System.Net.HttpRequestHeader.ContentType] = "application/json";
 
+                    // ── Step 1: version check (GET /) ────────────────────────────
+                    // The server responds to GET with {"name":"...","version":"X.Y.Z"}.
+                    // If the version doesn't match what was shipped with this VSIX,
+                    // the cached process is stale and must be restarted.
+                    try
+                    {
+                        string infoResp = client.DownloadString(url);
+                        bool versionOk = infoResp.Contains(ExpectedMcpServerVersion);
+                        sb.AppendLine("Version: " + (versionOk
+                            ? "OK (" + ExpectedMcpServerVersion + ")"
+                            : "MISMATCH (expected " + ExpectedMcpServerVersion + ") — server will be restarted"));
+                        if (!versionOk)
+                        {
+                            details = sb.ToString();
+                            return false;
+                        }
+                    }
+                    catch (Exception vEx)
+                    {
+                        sb.AppendLine("Version GET failed: " + vEx.Message + " — will restart server");
+                        details = sb.ToString();
+                        return false;
+                    }
+
+                    // ── Step 2: initialize ───────────────────────────────────────
                     string initJson = "{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"initialize\",\"params\":{\"protocolVersion\":\"2024-11-05\",\"capabilities\":{},\"clientInfo\":{\"name\":\"xpp-copilot-probe\",\"version\":\"0.3.0\"}}}";
                     string initResp = client.UploadString(url, initJson);
                     bool initOk = !string.IsNullOrWhiteSpace(initResp) && initResp.Contains("\"result\"");
                     sb.AppendLine("Initialize: " + (initOk ? "OK" : "FAILED"));
 
+                    // ── Step 3: tools/list — all expected tools present? ─────────
+                    // Check for tools that were absent in older (≤5-tool) server builds.
+                    // If any are missing the binary is outdated and must be replaced.
                     string listJson = "{\"jsonrpc\":\"2.0\",\"id\":2,\"method\":\"tools/list\",\"params\":{}}";
                     string listResp = client.UploadString(url, listJson);
                     bool listOk = !string.IsNullOrWhiteSpace(listResp) && listResp.Contains("xpp_create_object");
-                    bool hasAllTools = listOk && listResp.Contains("xpp_search_docs");
+                    bool hasAllTools = listOk
+                        && listResp.Contains("xpp_search_docs")
+                        && listResp.Contains("xpp_list_models")
+                        && listResp.Contains("xpp_add_to_project")
+                        && listResp.Contains("xpp_get_environment");
                     sb.AppendLine("ToolsList: " + (listOk ? "OK" : "FAILED")
-                        + (listOk && !hasAllTools ? " (missing xpp_search_docs — outdated server)" : ""));
+                        + (listOk && !hasAllTools ? " (missing tools — outdated server, will restart)" : ""));
 
                     details = sb.ToString();
                     return initOk && hasAllTools;
