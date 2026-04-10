@@ -100,11 +100,35 @@ namespace XppAiCopilotCompanion.MetaModel
                         return CreateTile(request, saveInfo);
                     case "AxConfigurationKey":
                         return CreateConfigurationKey(request, saveInfo);
+
+                    // ── Extension types (no typed Create API — uses XML serialization) ──
+                    case "AxTableExtension":
+                        return CreateExtensionObject(request, saveInfo, typeof(AxTableExtension), "AxTableExtension");
+                    case "AxFormExtension":
+                        return CreateExtensionObject(request, saveInfo, typeof(AxFormExtension), "AxFormExtension");
+                    case "AxEnumExtension":
+                        return CreateExtensionObject(request, saveInfo, typeof(AxEnumExtension), "AxEnumExtension");
+                    case "AxEdtExtension":
+                        return CreateExtensionObject(request, saveInfo, typeof(AxEdtExtension), "AxEdtExtension");
+                    case "AxViewExtension":
+                        return CreateExtensionObject(request, saveInfo, typeof(AxViewExtension), "AxViewExtension");
+                    case "AxMenuExtension":
+                        return CreateExtensionObject(request, saveInfo, typeof(AxMenuExtension), "AxMenuExtension");
+                    case "AxMenuItemDisplayExtension":
+                        return CreateExtensionObject(request, saveInfo, typeof(AxMenuItemDisplayExtension), "AxMenuItemDisplayExtension");
+                    case "AxMenuItemOutputExtension":
+                        return CreateExtensionObject(request, saveInfo, typeof(AxMenuItemOutputExtension), "AxMenuItemOutputExtension");
+                    case "AxMenuItemActionExtension":
+                        return CreateExtensionObject(request, saveInfo, typeof(AxMenuItemActionExtension), "AxMenuItemActionExtension");
+                    case "AxQuerySimpleExtension":
+                        return CreateExtensionObject(request, saveInfo, typeof(AxQuerySimpleExtension), "AxQuerySimpleExtension");
+                    case "AxSecurityDutyExtension":
+                        return CreateExtensionObject(request, saveInfo, typeof(AxSecurityDutyExtension), "AxSecurityDutyExtension");
+                    case "AxSecurityRoleExtension":
+                        return CreateExtensionObject(request, saveInfo, typeof(AxSecurityRoleExtension), "AxSecurityRoleExtension");
+
                     default:
-                        return Fail("Unsupported object type for API creation: " + request.ObjectType
-                            + ". Supported: AxClass, AxTable, AxForm, AxEdt, AxEnum, AxMenuItemDisplay/Output/Action, "
-                            + "AxQuery, AxView, AxDataEntityView, AxSecurityPrivilege/Duty/Role, "
-                            + "AxService, AxServiceGroup, AxMap, AxMenu, AxTile, AxConfigurationKey.");
+                        return Fail("Unsupported object type: " + request.ObjectType);
                 }
             }
             catch (Exception ex)
@@ -697,6 +721,7 @@ namespace XppAiCopilotCompanion.MetaModel
                 axForm.SourceCode.Declaration = StripCData(req.Declaration);
 
             AddMethods(axForm.Methods, req.Methods);
+            ApplyMetadataXml(axForm, req.MetadataXml);
             MetaService.CreateForm(axForm, saveInfo);
             AddToProjectIfActive("AxForm", req.ObjectName);
             return Ok("Created AxForm '" + req.ObjectName + "'.");
@@ -809,6 +834,7 @@ namespace XppAiCopilotCompanion.MetaModel
         private MetaModelResult CreateService(CreateObjectRequest req, ModelSaveInfo saveInfo)
         {
             var svc = new AxService { Name = req.ObjectName };
+            ApplyMetadataXml(svc, req.MetadataXml);
             MetaService.CreateService(svc, saveInfo);
             AddToProjectIfActive("AxService", req.ObjectName);
             return Ok("Created AxService '" + req.ObjectName + "'.");
@@ -817,6 +843,7 @@ namespace XppAiCopilotCompanion.MetaModel
         private MetaModelResult CreateServiceGroup(CreateObjectRequest req, ModelSaveInfo saveInfo)
         {
             var grp = new AxServiceGroup { Name = req.ObjectName };
+            ApplyMetadataXml(grp, req.MetadataXml);
             MetaService.CreateServiceGroup(grp, saveInfo);
             AddToProjectIfActive("AxServiceGroup", req.ObjectName);
             return Ok("Created AxServiceGroup '" + req.ObjectName + "'.");
@@ -825,6 +852,10 @@ namespace XppAiCopilotCompanion.MetaModel
         private MetaModelResult CreateMap(CreateObjectRequest req, ModelSaveInfo saveInfo)
         {
             var map = new AxMap { Name = req.ObjectName };
+            if (!string.IsNullOrEmpty(req.Declaration))
+                map.Declaration = StripCData(req.Declaration);
+            AddMethods(map.Methods, req.Methods);
+            ApplyMetadataXml(map, req.MetadataXml);
             MetaService.CreateMap(map, saveInfo);
             AddToProjectIfActive("AxMap", req.ObjectName);
             return Ok("Created AxMap '" + req.ObjectName + "'.");
@@ -833,6 +864,7 @@ namespace XppAiCopilotCompanion.MetaModel
         private MetaModelResult CreateMenu(CreateObjectRequest req, ModelSaveInfo saveInfo)
         {
             var menu = new AxMenu { Name = req.ObjectName };
+            ApplyMetadataXml(menu, req.MetadataXml);
             MetaService.CreateMenu(menu, saveInfo);
             AddToProjectIfActive("AxMenu", req.ObjectName);
             return Ok("Created AxMenu '" + req.ObjectName + "'.");
@@ -841,6 +873,7 @@ namespace XppAiCopilotCompanion.MetaModel
         private MetaModelResult CreateTile(CreateObjectRequest req, ModelSaveInfo saveInfo)
         {
             var tile = new AxTile { Name = req.ObjectName };
+            ApplyMetadataXml(tile, req.MetadataXml);
             MetaService.CreateTile(tile, saveInfo);
             AddToProjectIfActive("AxTile", req.ObjectName);
             return Ok("Created AxTile '" + req.ObjectName + "'.");
@@ -849,9 +882,91 @@ namespace XppAiCopilotCompanion.MetaModel
         private MetaModelResult CreateConfigurationKey(CreateObjectRequest req, ModelSaveInfo saveInfo)
         {
             var key = new AxConfigurationKey { Name = req.ObjectName };
+            ApplyMetadataXml(key, req.MetadataXml);
             MetaService.CreateConfigurationKey(key, saveInfo);
             AddToProjectIfActive("AxConfigurationKey", req.ObjectName);
             return Ok("Created AxConfigurationKey '" + req.ObjectName + "'.");
+        }
+
+        /// <summary>
+        /// Creates an extension object by serializing it to XML and writing to the
+        /// model's metadata folder. The IMetaModelService has no Create/Update methods
+        /// for extension types, so this mirrors how the D365FO VS tools create extensions.
+        /// </summary>
+        private MetaModelResult CreateExtensionObject(CreateObjectRequest req, ModelSaveInfo saveInfo,
+            Type extensionType, string folderName)
+        {
+            try
+            {
+                var extObj = Activator.CreateInstance(extensionType);
+                extensionType.GetProperty("Name")?.SetValue(extObj, req.ObjectName);
+
+                // Apply metadata (fields, enum values, data sources, etc.)
+                ApplyMetadataXml(extObj, req.MetadataXml);
+
+                // Resolve file path
+                string filePath = GetExtensionFilePath(saveInfo, folderName, req.ObjectName);
+                if (filePath == null)
+                    return Fail("Could not determine metadata folder for model.");
+
+                if (File.Exists(filePath))
+                    return Fail("Extension '" + req.ObjectName + "' already exists at: " + filePath);
+
+                // Serialize and write
+                string dir = Path.GetDirectoryName(filePath);
+                if (!Directory.Exists(dir))
+                    Directory.CreateDirectory(dir);
+
+                var serializer = new XmlSerializer(extensionType);
+                var settings = new XmlWriterSettings
+                {
+                    Indent = true,
+                    Encoding = new UTF8Encoding(false)
+                };
+                using (var stream = new FileStream(filePath, FileMode.Create, FileAccess.Write))
+                using (var writer = XmlWriter.Create(stream, settings))
+                {
+                    serializer.Serialize(writer, extObj);
+                }
+
+                AddToProjectIfActive(req.ObjectType, req.ObjectName);
+                return new MetaModelResult
+                {
+                    Success = true,
+                    Message = "Created " + req.ObjectType + " '" + req.ObjectName + "'.",
+                    FilePath = filePath
+                };
+            }
+            catch (Exception ex)
+            {
+                return Fail("Extension create failed: " + ex.Message);
+            }
+        }
+
+        private string GetExtensionFilePath(ModelSaveInfo saveInfo, string folderName, string objectName)
+        {
+            try
+            {
+                var config = DynamicsConfigurationReader.ReadActiveConfiguration();
+                string customFolder = config.CustomMetadataFolder;
+                if (string.IsNullOrEmpty(customFolder)) return null;
+
+                // Find the module (package) name for the model
+                string module = null;
+                foreach (var m in MetaService.GetModels())
+                {
+                    if (m.Id == saveInfo.Id)
+                    {
+                        module = m.Module;
+                        break;
+                    }
+                }
+                if (string.IsNullOrEmpty(module)) return null;
+
+                string dir = Path.Combine(customFolder, module, module, folderName);
+                return Path.Combine(dir, objectName + ".xml");
+            }
+            catch { return null; }
         }
 
         // ── Private helpers: Update operations ──
@@ -1118,6 +1233,21 @@ namespace XppAiCopilotCompanion.MetaModel
                 case "AxService": return typeof(AxService);
                 case "AxServiceGroup": return typeof(AxServiceGroup);
                 case "AxConfigurationKey": return typeof(AxConfigurationKey);
+
+                // Extension types
+                case "AxTableExtension": return typeof(AxTableExtension);
+                case "AxFormExtension": return typeof(AxFormExtension);
+                case "AxEnumExtension": return typeof(AxEnumExtension);
+                case "AxEdtExtension": return typeof(AxEdtExtension);
+                case "AxViewExtension": return typeof(AxViewExtension);
+                case "AxMenuExtension": return typeof(AxMenuExtension);
+                case "AxMenuItemDisplayExtension": return typeof(AxMenuItemDisplayExtension);
+                case "AxMenuItemOutputExtension": return typeof(AxMenuItemOutputExtension);
+                case "AxMenuItemActionExtension": return typeof(AxMenuItemActionExtension);
+                case "AxQuerySimpleExtension": return typeof(AxQuerySimpleExtension);
+                case "AxSecurityDutyExtension": return typeof(AxSecurityDutyExtension);
+                case "AxSecurityRoleExtension": return typeof(AxSecurityRoleExtension);
+
                 default: return null;
             }
         }

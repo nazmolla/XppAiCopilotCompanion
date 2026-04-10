@@ -74,6 +74,21 @@ namespace XppAiCopilotCompanion
                 case XppObjectType.AxService: return "AxService";
                 case XppObjectType.AxServiceGroup: return "AxServiceGroup";
                 case XppObjectType.AxConfigurationKey: return "AxConfigurationKey";
+
+                // Extension types
+                case XppObjectType.AxTableExtension: return "AxTableExtension";
+                case XppObjectType.AxFormExtension: return "AxFormExtension";
+                case XppObjectType.AxEnumExtension: return "AxEnumExtension";
+                case XppObjectType.AxEdtExtension: return "AxEdtExtension";
+                case XppObjectType.AxViewExtension: return "AxViewExtension";
+                case XppObjectType.AxMenuExtension: return "AxMenuExtension";
+                case XppObjectType.AxMenuItemDisplayExtension: return "AxMenuItemDisplayExtension";
+                case XppObjectType.AxMenuItemOutputExtension: return "AxMenuItemOutputExtension";
+                case XppObjectType.AxMenuItemActionExtension: return "AxMenuItemActionExtension";
+                case XppObjectType.AxQuerySimpleExtension: return "AxQuerySimpleExtension";
+                case XppObjectType.AxSecurityDutyExtension: return "AxSecurityDutyExtension";
+                case XppObjectType.AxSecurityRoleExtension: return "AxSecurityRoleExtension";
+
                 default:
                     throw new NotSupportedException(
                         "Object type '" + objectType + "' is not supported through the MetaModel API. "

@@ -7,6 +7,7 @@ namespace XppAiCopilotCompanion
         AxTable,
         AxTableExtension,
         AxView,
+        AxViewExtension,
         AxDataEntityView,
         AxCompositeDataEntityView,
         AxMap,
@@ -24,8 +25,11 @@ namespace XppAiCopilotCompanion
         AxMenu,
         AxMenuExtension,
         AxMenuItemDisplay,
+        AxMenuItemDisplayExtension,
         AxMenuItemOutput,
+        AxMenuItemOutputExtension,
         AxMenuItemAction,
+        AxMenuItemActionExtension,
 
         // Queries
         AxQuery,
@@ -34,7 +38,9 @@ namespace XppAiCopilotCompanion
         // Security
         AxSecurityPrivilege,
         AxSecurityDuty,
+        AxSecurityDutyExtension,
         AxSecurityRole,
+        AxSecurityRoleExtension,
         AxSecurityPolicy,
 
         // Services
