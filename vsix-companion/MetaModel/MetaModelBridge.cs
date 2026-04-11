@@ -297,7 +297,7 @@ namespace XppAiCopilotCompanion.MetaModel
                         break;
 
                     default:
-                        return new ReadObjectResult { Message = "Read not supported for type: " + objectType + ". Use ReadObjectByPath for XML-based read." };
+                        return new ReadObjectResult { Message = "Read not supported for type: " + objectType + ". Supported types: AxClass, AxTable, AxForm, AxEnum, AxEdt, AxView, AxQuery. Use xpp_find_object to search by name." };
                 }
 
                 result.IsCustom = IsCustomModel(result.ModelName);
@@ -311,47 +311,127 @@ namespace XppAiCopilotCompanion.MetaModel
 
         public ReadObjectResult ReadObjectByPath(string filePath)
         {
-            // Fallback to XML file read for types not covered by the typed API
+            if (string.IsNullOrEmpty(filePath))
+                return new ReadObjectResult { Message = "filePath is required." };
             if (!File.Exists(filePath))
                 return new ReadObjectResult { Message = "File not found: " + filePath };
 
-            try
+            // Derive type and name from the path structure:
+            // <root>\<Package>\<Model>\AxClass\MyClass.xml → type=AxClass, name=MyClass
+            string objectName = Path.GetFileNameWithoutExtension(filePath);
+            string folder = Path.GetFileName(Path.GetDirectoryName(filePath) ?? "") ?? "";
+
+            if (!string.IsNullOrEmpty(folder) && folder.StartsWith("Ax", StringComparison.OrdinalIgnoreCase))
             {
-                var doc = new XmlDocument();
-                doc.Load(filePath);
-                var root = doc.DocumentElement;
-
-                var result = new ReadObjectResult
+                var result = ReadObject(folder, objectName);
+                if (result != null)
                 {
-                    Success = true,
-                    ObjectType = root.Name,
-                    ObjectName = root.SelectSingleNode("Name")?.InnerText ?? Path.GetFileNameWithoutExtension(filePath),
-                    FilePath = filePath,
-                    IsCustom = !IsStandardPackagePath(filePath)
-                };
-
-                var declNode = root.SelectSingleNode("SourceCode/Declaration");
-                if (declNode != null)
-                    result.Declaration = GetCDataText(declNode);
-
-                var methodNodes = root.SelectNodes("SourceCode/Methods/Method");
-                if (methodNodes != null)
-                {
-                    foreach (XmlNode mn in methodNodes)
-                    {
-                        string mName = mn.SelectSingleNode("Name")?.InnerText ?? "";
-                        var srcNode = mn.SelectSingleNode("Source");
-                        string mSource = srcNode != null ? GetCDataText(srcNode) : "";
-                        result.Methods.Add(new MethodInfo { Name = mName, Source = mSource });
-                    }
+                    result.FilePath = filePath;
+                    return result;
                 }
+            }
 
+            return new ReadObjectResult
+            {
+                Message = "Cannot read type '" + folder + "' via the MetaModel API. "
+                        + "Supported types: AxClass, AxTable, AxForm, AxEnum, AxEdt, AxView, AxQuery. "
+                        + "Use xpp_find_object to locate objects by name."
+            };
+        }
+
+        // ── Validation ──
+
+        public ValidateObjectResult ValidateObject(ValidateObjectRequest req)
+        {
+            ThreadHelper.ThrowIfNotOnUIThread();
+
+            var result = new ValidateObjectResult { ObjectType = req.ObjectType, ObjectName = req.ObjectName };
+
+            // 1. Read the object via typed API
+            var readResult = ReadObject(req.ObjectType, req.ObjectName);
+            if (!readResult.Success)
+            {
+                result.Message = "Object not found: " + (readResult.Message ?? "unknown error");
                 return result;
             }
-            catch (Exception ex)
+
+            result.Exists = true;
+            result.ModelName = readResult.ModelName;
+
+            // 2. Check if in the active project (by name in filePath or item name)
+            var projectItems = ListProjectItems();
+            result.InProject = projectItems.Any(p =>
+                (p.FilePath != null && p.FilePath.IndexOf(req.ObjectName, StringComparison.OrdinalIgnoreCase) >= 0) ||
+                string.Equals(p.Name, req.ObjectName, StringComparison.OrdinalIgnoreCase));
+
+            // 3. Compare expected vs actual properties
+            var mismatches = new List<string>();
+
+            if (req.Properties != null)
             {
-                return new ReadObjectResult { Message = "Read failed: " + ex.Message };
+                foreach (var kv in req.Properties)
+                {
+                    if (readResult.Properties == null || !readResult.Properties.TryGetValue(kv.Key, out string actual))
+                        mismatches.Add("Property '" + kv.Key + "': expected '" + kv.Value + "', not found on object");
+                    else if (!string.Equals(actual, kv.Value, StringComparison.OrdinalIgnoreCase))
+                        mismatches.Add("Property '" + kv.Key + "': expected '" + kv.Value + "', actual '" + actual + "'");
+                }
             }
+
+            if (req.Fields != null)
+            {
+                foreach (var f in req.Fields)
+                {
+                    bool found = readResult.Fields != null &&
+                        readResult.Fields.Any(x => string.Equals(x.Name, f.Name, StringComparison.OrdinalIgnoreCase));
+                    if (!found)
+                        mismatches.Add("Field '" + f.Name + "': expected to exist, not found");
+                }
+            }
+
+            if (req.EnumValues != null)
+            {
+                foreach (var ev in req.EnumValues)
+                {
+                    bool found = readResult.EnumValues != null &&
+                        readResult.EnumValues.Any(x => string.Equals(x.Name, ev.Name, StringComparison.OrdinalIgnoreCase));
+                    if (!found)
+                        mismatches.Add("EnumValue '" + ev.Name + "': expected to exist, not found");
+                }
+            }
+
+            if (req.Indexes != null)
+            {
+                foreach (var idx in req.Indexes)
+                {
+                    bool found = readResult.Indexes != null &&
+                        readResult.Indexes.Any(x => string.Equals(x.Name, idx.Name, StringComparison.OrdinalIgnoreCase));
+                    if (!found)
+                        mismatches.Add("Index '" + idx.Name + "': expected to exist, not found");
+                }
+            }
+
+            if (req.Relations != null)
+            {
+                foreach (var rel in req.Relations)
+                {
+                    bool found = readResult.Relations != null &&
+                        readResult.Relations.Any(x => string.Equals(x.Name, rel.Name, StringComparison.OrdinalIgnoreCase));
+                    if (!found)
+                        mismatches.Add("Relation '" + rel.Name + "': expected to exist, not found");
+                }
+            }
+
+            result.Mismatches = mismatches;
+            result.Valid = result.InProject && mismatches.Count == 0;
+            if (result.Valid)
+                result.Message = "Validation passed. Object exists in project and all specified metadata is present.";
+            else if (!result.InProject && mismatches.Count == 0)
+                result.Message = "Object metadata is correct but it is NOT in the active project.";
+            else
+                result.Message = "Validation failed: " + mismatches.Count + " mismatch(es). InProject=" + result.InProject + ".";
+
+            return result;
         }
 
         // ── Discovery ──
@@ -1711,14 +1791,6 @@ namespace XppAiCopilotCompanion.MetaModel
             foreach (string pkg in standardPackages)
                 if (lower.Contains(pkg)) return true;
             return false;
-        }
-
-        private static string GetCDataText(XmlNode node)
-        {
-            foreach (XmlNode child in node.ChildNodes)
-                if (child.NodeType == XmlNodeType.CDATA)
-                    return child.Value ?? "";
-            return node.InnerText ?? "";
         }
 
         /// <summary>

@@ -30,6 +30,9 @@ ownership rules, auto-add objects to the VS project, and handle all operations.
   xpp_list_models              — List ALL models in the environment with editability status.
   xpp_add_to_project           — Add an existing object to the active VS project.
   xpp_list_project_items       — List all items in the active VS project.
+  xpp_validate_object          — Validate that an object exists, is in the project, and has the
+                                  expected properties/fields/relations. Automatically called after
+                                  every create/update — also call explicitly when in doubt.
   xpp_get_environment          — Get environment info: metadata folders, active project/model.
 
   ── Labels ──
@@ -51,6 +54,10 @@ MANDATORY TOOL-FIRST RULES:
   8. NEVER fall back to generic file search/read when an X++ tool can do the job.
   9. If a tool call fails, diagnose the error and retry with corrected parameters.
      Do NOT abandon tools and switch to manual file operations.
+  12. After EVERY xpp_create_object or xpp_update_object call, CHECK the validation
+     result embedded in the response (the "validation" field). If valid=false, diagnose
+     the mismatches and fix them with an additional xpp_update_object call. NEVER
+     report success to the user until validation passes.
   10. When UNSURE about X++ syntax, API signatures, table structures, extensibility
      rules, or any D365FO concept → call xpp_search_docs BEFORE writing code.
      Do NOT guess. The docs tool searches learn.microsoft.com for accurate answers.
@@ -64,8 +71,8 @@ ALL communication with the X++ tools is JSON. NEVER send XML in ANY parameter.
   - declaration / methods: plain X++ source code strings. NO XML tags, NO CDATA wrappers.
   - properties / fields / indexes / relations / enumValues / fieldGroups / entryPoints:
     JSON objects and arrays as documented in the tool schemas.
-  - metadataXml: despite the legacy name, this parameter accepts a JSON string
-    containing typed metadata — NEVER put XML here.
+  - Do NOT use or pass a "metadataXml" parameter — it is deprecated. Use the named JSON
+    parameters (properties, fields, enumValues, etc.) directly.
 
 The API WILL REJECT any parameter that contains XML (detected by leading '<' or
 '<?xml') and return an error. If you receive an XML rejection error, reformat

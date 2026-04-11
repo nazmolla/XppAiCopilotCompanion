@@ -164,6 +164,8 @@ namespace XppAiCopilotCompanion.MetaModel
                     return HandleListProjectItems(body);
                 case "get_environment":
                     return HandleGetEnvironment(body);
+                case "validate_object":
+                    return HandleValidateObject(body);
                 default:
                     return "{\"success\":false,\"message\":\"Unknown action: " + EscapeJson(action ?? "") + "\"}";
             }
@@ -208,7 +210,22 @@ namespace XppAiCopilotCompanion.MetaModel
                 + " fields=" + (req.Fields?.Count ?? 0));
 
             var result = _bridge.CreateObject(req);
-            return SerializeResult(result);
+            if (!result.Success)
+                return SerializeResult(result);
+
+            // Post-creation validation: verify object exists in project and metadata applied
+            var validation = _bridge.ValidateObject(new ValidateObjectRequest
+            {
+                ObjectType = req.ObjectType,
+                ObjectName = req.ObjectName,
+                Properties = req.Properties,
+                Fields = req.Fields,
+                EnumValues = req.EnumValues,
+                Indexes = req.Indexes,
+                Relations = req.Relations
+            });
+
+            return SerializeResultWithValidation(result, validation);
         }
 
         private string HandleReadObject(string body)
@@ -256,7 +273,38 @@ namespace XppAiCopilotCompanion.MetaModel
                 return SerializeResult(new MetaModelResult { Success = false, Message = xmlError });
 
             var result = _bridge.UpdateObject(req);
-            return SerializeResult(result);
+            if (!result.Success)
+                return SerializeResult(result);
+
+            // Post-update validation: verify metadata was applied
+            var validation = _bridge.ValidateObject(new ValidateObjectRequest
+            {
+                ObjectType = req.ObjectType,
+                ObjectName = req.ObjectName,
+                Properties = req.Properties,
+                Fields = req.Fields,
+                EnumValues = req.EnumValues,
+                Indexes = req.Indexes,
+                Relations = req.Relations
+            });
+
+            return SerializeResultWithValidation(result, validation);
+        }
+
+        private string HandleValidateObject(string body)
+        {
+            var req = new ValidateObjectRequest
+            {
+                ObjectType = ExtractJsonString(body, "objectType"),
+                ObjectName = ExtractJsonString(body, "objectName"),
+                Properties = ExtractJsonObject(body, "properties"),
+                Fields = ParseFields(body),
+                EnumValues = ParseEnumValues(body),
+                Indexes = ParseIndexes(body),
+                Relations = ParseRelations(body)
+            };
+            var result = _bridge.ValidateObject(req);
+            return SerializeValidateResult(result);
         }
 
         private string HandleDeleteObject(string body)
@@ -445,6 +493,48 @@ namespace XppAiCopilotCompanion.MetaModel
         }
 
         // ── Serialization helpers ──
+
+        private string SerializeResultWithValidation(MetaModelResult r, ValidateObjectResult v)
+        {
+            var sb = new StringBuilder();
+            sb.Append("{\"success\":" + (r.Success ? "true" : "false"));
+            sb.Append(",\"message\":\"" + EscapeJson(r.Message ?? "") + "\"");
+            if (r.FilePath != null)
+                sb.Append(",\"filePath\":\"" + EscapeJson(r.FilePath) + "\"");
+            sb.Append(",\"validation\":");
+            sb.Append(BuildValidationJson(v));
+            sb.Append("}");
+            return sb.ToString();
+        }
+
+        private string SerializeValidateResult(ValidateObjectResult v)
+        {
+            return BuildValidationJson(v);
+        }
+
+        private static string BuildValidationJson(ValidateObjectResult v)
+        {
+            var sb = new StringBuilder();
+            sb.Append("{\"valid\":" + (v.Valid ? "true" : "false"));
+            sb.Append(",\"exists\":" + (v.Exists ? "true" : "false"));
+            sb.Append(",\"inProject\":" + (v.InProject ? "true" : "false"));
+            if (v.ObjectType != null) sb.Append(",\"objectType\":\"" + EscapeJson(v.ObjectType) + "\"");
+            if (v.ObjectName != null) sb.Append(",\"objectName\":\"" + EscapeJson(v.ObjectName) + "\"");
+            if (v.ModelName != null) sb.Append(",\"modelName\":\"" + EscapeJson(v.ModelName) + "\"");
+            sb.Append(",\"message\":\"" + EscapeJson(v.Message ?? "") + "\"");
+            if (v.Mismatches != null && v.Mismatches.Count > 0)
+            {
+                sb.Append(",\"mismatches\":[");
+                for (int i = 0; i < v.Mismatches.Count; i++)
+                {
+                    if (i > 0) sb.Append(",");
+                    sb.Append("\"" + EscapeJson(v.Mismatches[i]) + "\"");
+                }
+                sb.Append("]");
+            }
+            sb.Append("}");
+            return sb.ToString();
+        }
 
         private string SerializeResult(MetaModelResult r)
         {

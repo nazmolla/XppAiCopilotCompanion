@@ -216,6 +216,23 @@ namespace XppAiCopilotCompanion.McpServer
         ""required"": [""query""]
       }
     }
+    {
+      ""name"": ""xpp_validate_object"",
+      ""description"": ""Validates that a D365FO object exists, is added to the active VS project, and has the expected metadata properties/fields/relations. Use after xpp_create_object or xpp_update_object to confirm all metadata was applied correctly. Returns valid=true only when ALL checks pass: object exists, in project, and all specified properties/fields match. Returns a mismatches list describing any discrepancies."",
+      ""inputSchema"": {
+        ""type"": ""object"",
+        ""properties"": {
+          ""objectType"": { ""type"": ""string"", ""description"": ""The object type (AxClass, AxTable, AxEnum, AxEdt, AxView, AxQuery)."" },
+          ""objectName"": { ""type"": ""string"", ""description"": ""The object name to validate."" },
+          ""properties"": { ""type"": ""object"", ""description"": ""Expected key-value property pairs to verify (e.g. {Label: '@MyLabel', IsExtensible: 'true'}). Each entry is checked against the actual object."" },
+          ""fields"": { ""type"": ""array"", ""items"": { ""type"": ""object"", ""properties"": { ""name"": { ""type"": ""string"" } }, ""required"": [""name""] }, ""description"": ""Expected table fields — only names are checked for existence."" },
+          ""enumValues"": { ""type"": ""array"", ""items"": { ""type"": ""object"", ""properties"": { ""name"": { ""type"": ""string"" } }, ""required"": [""name""] }, ""description"": ""Expected enum value names to verify exist on the enum."" },
+          ""indexes"": { ""type"": ""array"", ""items"": { ""type"": ""object"", ""properties"": { ""name"": { ""type"": ""string"" } }, ""required"": [""name""] }, ""description"": ""Expected index names to verify exist on the table."" },
+          ""relations"": { ""type"": ""array"", ""items"": { ""type"": ""object"", ""properties"": { ""name"": { ""type"": ""string"" } }, ""required"": [""name""] }, ""description"": ""Expected relation names to verify exist on the table."" }
+        },
+        ""required"": [""objectType"", ""objectName""]
+      }
+    }
   ]
 }";
             return JsonHelpers.BuildResult(idToken, result);
@@ -243,6 +260,7 @@ namespace XppAiCopilotCompanion.McpServer
                 case "xpp_add_to_project": return DelegateToBridge(idToken, json, "add_to_project");
                 case "xpp_list_project_items": return DelegateToBridge(idToken, json, "list_project_items");
                 case "xpp_get_environment": return DelegateToBridge(idToken, json, "get_environment");
+                case "xpp_validate_object": return DelegateToBridge(idToken, json, "validate_object");
 
                 // ── Local-only tools ──
                 case "xpp_search_docs": return _docSearch.Handle(idToken, json);

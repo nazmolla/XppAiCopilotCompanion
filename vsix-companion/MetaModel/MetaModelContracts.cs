@@ -206,4 +206,27 @@ namespace XppAiCopilotCompanion.MetaModel
         public long ActiveModelId { get; set; }
         public string ActiveModelLayer { get; set; }
     }
+
+    public sealed class ValidateObjectRequest
+    {
+        public string ObjectType { get; set; }
+        public string ObjectName { get; set; }
+        public Dictionary<string, string> Properties { get; set; }
+        public List<EnumValueDto> EnumValues { get; set; }
+        public List<FieldDto> Fields { get; set; }
+        public List<IndexDto> Indexes { get; set; }
+        public List<RelationDto> Relations { get; set; }
+    }
+
+    public sealed class ValidateObjectResult
+    {
+        public bool Valid { get; set; }
+        public bool Exists { get; set; }
+        public bool InProject { get; set; }
+        public string ObjectType { get; set; }
+        public string ObjectName { get; set; }
+        public string ModelName { get; set; }
+        public string Message { get; set; }
+        public List<string> Mismatches { get; set; } = new List<string>();
+    }
 }

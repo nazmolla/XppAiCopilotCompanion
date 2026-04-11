@@ -17,6 +17,7 @@ namespace XppAiCopilotCompanion.MetaModel
         MetaModelResult DeleteObject(string objectType, string objectName, string modelName);
         ReadObjectResult ReadObject(string objectType, string objectName);
         ReadObjectResult ReadObjectByPath(string filePath);
+        ValidateObjectResult ValidateObject(ValidateObjectRequest request);
 
         // ── Discovery ──
 
