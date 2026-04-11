@@ -4,6 +4,7 @@ using System.Net;
 using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
+using System.Xml;
 using Microsoft.VisualStudio.Shell;
 
 namespace XppAiCopilotCompanion.MetaModel
@@ -629,31 +630,38 @@ namespace XppAiCopilotCompanion.MetaModel
             if (req.Properties != null || req.EnumValues != null || req.Fields != null)
                 return; // Already have typed metadata, skip fallback
 
-            string metadataJson = ExtractJsonString(body, "metadataXml");
-            if (string.IsNullOrEmpty(metadataJson)) return;
+            string metadataStr = ExtractJsonString(body, "metadataXml");
+            if (string.IsNullOrEmpty(metadataStr)) return;
 
-            // metadataJson is the decoded JSON string — a flat object with properties
-            // and optionally typed arrays like enumValues, fields, etc.
-            if (req.EnumValues == null) req.EnumValues = ParseEnumValues(metadataJson);
-            if (req.Fields == null) req.Fields = ParseFields(metadataJson);
-            if (req.Indexes == null) req.Indexes = ParseIndexes(metadataJson);
-            if (req.FieldGroups == null) req.FieldGroups = ParseFieldGroups(metadataJson);
-            if (req.Relations == null) req.Relations = ParseRelations(metadataJson);
-            if (req.EntryPoints == null) req.EntryPoints = ParseEntryPoints(metadataJson);
+            // Detect XML content vs JSON content
+            string trimmed = metadataStr.TrimStart();
+            if (trimmed.StartsWith("<"))
+            {
+                NormalizeFromXmlContent(trimmed, req);
+                return;
+            }
+
+            // metadataStr is a JSON string — parse typed arrays from it
+            if (req.EnumValues == null) req.EnumValues = ParseEnumValues(metadataStr);
+            if (req.Fields == null) req.Fields = ParseFields(metadataStr);
+            if (req.Indexes == null) req.Indexes = ParseIndexes(metadataStr);
+            if (req.FieldGroups == null) req.FieldGroups = ParseFieldGroups(metadataStr);
+            if (req.Relations == null) req.Relations = ParseRelations(metadataStr);
+            if (req.EntryPoints == null) req.EntryPoints = ParseEntryPoints(metadataStr);
 
             // Extract top-level key-value pairs as properties (excluding known typed keys)
             if (req.Properties == null)
-                req.Properties = ExtractJsonObject(metadataJson, "properties") ?? ExtractFlatProperties(metadataJson);
+                req.Properties = ExtractJsonObject(metadataStr, "properties") ?? ExtractFlatProperties(metadataStr);
 
             // Also check for objectType/objectName/declaration inside metadataXml
             if (string.IsNullOrEmpty(req.ObjectType))
-                req.ObjectType = ExtractJsonString(metadataJson, "objectType");
+                req.ObjectType = ExtractJsonString(metadataStr, "objectType");
             if (string.IsNullOrEmpty(req.ObjectName))
-                req.ObjectName = ExtractJsonString(metadataJson, "objectName");
+                req.ObjectName = ExtractJsonString(metadataStr, "objectName");
             if (string.IsNullOrEmpty(req.ModelName))
-                req.ModelName = ExtractJsonString(metadataJson, "modelName");
+                req.ModelName = ExtractJsonString(metadataStr, "modelName");
             if (string.IsNullOrEmpty(req.Declaration))
-                req.Declaration = ExtractJsonString(metadataJson, "declaration");
+                req.Declaration = ExtractJsonString(metadataStr, "declaration");
         }
 
         private void NormalizeFromMetadataXml(string body, UpdateObjectRequest req)
@@ -661,25 +669,435 @@ namespace XppAiCopilotCompanion.MetaModel
             if (req.Properties != null || req.EnumValues != null || req.Fields != null)
                 return;
 
-            string metadataJson = ExtractJsonString(body, "metadataXml");
-            if (string.IsNullOrEmpty(metadataJson)) return;
+            string metadataStr = ExtractJsonString(body, "metadataXml");
+            if (string.IsNullOrEmpty(metadataStr)) return;
 
-            if (req.EnumValues == null) req.EnumValues = ParseEnumValues(metadataJson);
-            if (req.Fields == null) req.Fields = ParseFields(metadataJson);
-            if (req.Indexes == null) req.Indexes = ParseIndexes(metadataJson);
-            if (req.FieldGroups == null) req.FieldGroups = ParseFieldGroups(metadataJson);
-            if (req.Relations == null) req.Relations = ParseRelations(metadataJson);
-            if (req.EntryPoints == null) req.EntryPoints = ParseEntryPoints(metadataJson);
+            string trimmed = metadataStr.TrimStart();
+            if (trimmed.StartsWith("<"))
+            {
+                NormalizeFromXmlContent(trimmed, req);
+                return;
+            }
+
+            if (req.EnumValues == null) req.EnumValues = ParseEnumValues(metadataStr);
+            if (req.Fields == null) req.Fields = ParseFields(metadataStr);
+            if (req.Indexes == null) req.Indexes = ParseIndexes(metadataStr);
+            if (req.FieldGroups == null) req.FieldGroups = ParseFieldGroups(metadataStr);
+            if (req.Relations == null) req.Relations = ParseRelations(metadataStr);
+            if (req.EntryPoints == null) req.EntryPoints = ParseEntryPoints(metadataStr);
 
             if (req.Properties == null)
-                req.Properties = ExtractJsonObject(metadataJson, "properties") ?? ExtractFlatProperties(metadataJson);
+                req.Properties = ExtractJsonObject(metadataStr, "properties") ?? ExtractFlatProperties(metadataStr);
 
             if (string.IsNullOrEmpty(req.ObjectType))
-                req.ObjectType = ExtractJsonString(metadataJson, "objectType");
+                req.ObjectType = ExtractJsonString(metadataStr, "objectType");
             if (string.IsNullOrEmpty(req.ObjectName))
-                req.ObjectName = ExtractJsonString(metadataJson, "objectName");
+                req.ObjectName = ExtractJsonString(metadataStr, "objectName");
             if (string.IsNullOrEmpty(req.Declaration))
-                req.Declaration = ExtractJsonString(metadataJson, "declaration");
+                req.Declaration = ExtractJsonString(metadataStr, "declaration");
+        }
+
+        // ── XML metadata parsing (when Copilot sends D365FO XML instead of JSON) ──
+
+        private void NormalizeFromXmlContent(string xmlContent, CreateObjectRequest req)
+        {
+            XmlElement root = ParseXmlRoot(xmlContent);
+            if (root == null) return;
+
+            // Infer objectType from root element name (e.g. AxTable, AxEnum, AxQuery)
+            if (string.IsNullOrEmpty(req.ObjectType))
+            {
+                string rootName = root.LocalName;
+                if (rootName.StartsWith("Ax") && rootName != "Root")
+                    req.ObjectType = rootName;
+            }
+
+            if (string.IsNullOrEmpty(req.ObjectName))
+                req.ObjectName = GetXmlChildText(root, "Name");
+
+            if (string.IsNullOrEmpty(req.Declaration))
+            {
+                XmlNode srcCode = root.SelectSingleNode("SourceCode");
+                if (srcCode != null)
+                {
+                    XmlNode decl = srcCode.SelectSingleNode("Declaration");
+                    if (decl != null)
+                        req.Declaration = StripXmlCData(decl.InnerText);
+                }
+            }
+
+            if (string.IsNullOrEmpty(req.ModelName))
+                req.ModelName = GetXmlChildText(root, "ModelName");
+
+            if (req.Properties == null)
+                req.Properties = ExtractXmlProperties(root);
+            if (req.Fields == null)
+                req.Fields = ParseXmlFields(root);
+            if (req.Indexes == null)
+                req.Indexes = ParseXmlIndexes(root);
+            if (req.FieldGroups == null)
+                req.FieldGroups = ParseXmlFieldGroups(root);
+            if (req.Relations == null)
+                req.Relations = ParseXmlRelations(root);
+            if (req.EnumValues == null)
+                req.EnumValues = ParseXmlEnumValues(root);
+            if (req.EntryPoints == null)
+                req.EntryPoints = ParseXmlEntryPoints(root);
+
+            if (req.Methods == null)
+            {
+                XmlNode srcCode = root.SelectSingleNode("SourceCode");
+                if (srcCode != null)
+                {
+                    var methods = srcCode.SelectNodes("Methods/Method");
+                    if (methods != null && methods.Count > 0)
+                    {
+                        var list = new System.Collections.Generic.List<string>();
+                        foreach (XmlNode m in methods)
+                        {
+                            XmlNode src = m.SelectSingleNode("Source");
+                            if (src != null) list.Add(StripXmlCData(src.InnerText));
+                        }
+                        if (list.Count > 0) req.Methods = list.ToArray();
+                    }
+                }
+            }
+
+            BridgeLog("NormalizeFromXmlContent objectType=" + req.ObjectType
+                + " name=" + req.ObjectName
+                + " props=" + (req.Properties?.Count ?? 0)
+                + " fields=" + (req.Fields?.Count ?? 0)
+                + " indexes=" + (req.Indexes?.Count ?? 0)
+                + " relations=" + (req.Relations?.Count ?? 0)
+                + " enumValues=" + (req.EnumValues?.Count ?? 0));
+        }
+
+        private void NormalizeFromXmlContent(string xmlContent, UpdateObjectRequest req)
+        {
+            XmlElement root = ParseXmlRoot(xmlContent);
+            if (root == null) return;
+
+            if (string.IsNullOrEmpty(req.ObjectType))
+            {
+                string rootName = root.LocalName;
+                if (rootName.StartsWith("Ax") && rootName != "Root")
+                    req.ObjectType = rootName;
+            }
+
+            if (string.IsNullOrEmpty(req.ObjectName))
+                req.ObjectName = GetXmlChildText(root, "Name");
+
+            if (string.IsNullOrEmpty(req.Declaration))
+            {
+                XmlNode srcCode = root.SelectSingleNode("SourceCode");
+                if (srcCode != null)
+                {
+                    XmlNode decl = srcCode.SelectSingleNode("Declaration");
+                    if (decl != null)
+                        req.Declaration = StripXmlCData(decl.InnerText);
+                }
+            }
+
+            if (req.Properties == null)
+                req.Properties = ExtractXmlProperties(root);
+            if (req.Fields == null)
+                req.Fields = ParseXmlFields(root);
+            if (req.Indexes == null)
+                req.Indexes = ParseXmlIndexes(root);
+            if (req.FieldGroups == null)
+                req.FieldGroups = ParseXmlFieldGroups(root);
+            if (req.Relations == null)
+                req.Relations = ParseXmlRelations(root);
+            if (req.EnumValues == null)
+                req.EnumValues = ParseXmlEnumValues(root);
+            if (req.EntryPoints == null)
+                req.EntryPoints = ParseXmlEntryPoints(root);
+
+            BridgeLog("NormalizeFromXmlContent(update) objectType=" + req.ObjectType
+                + " name=" + req.ObjectName
+                + " fields=" + (req.Fields?.Count ?? 0));
+        }
+
+        /// <summary>
+        /// Parse XML string into an XmlDocument root element.
+        /// Handles CDATA wrapping, XML declaration, namespace issues, and missing root elements.
+        /// </summary>
+        private XmlElement ParseXmlRoot(string xml)
+        {
+            try
+            {
+                // Strip outer CDATA wrapper
+                xml = StripXmlCData(xml);
+
+                // Strip XML declaration
+                string t = xml.TrimStart();
+                if (t.StartsWith("<?xml"))
+                {
+                    int end = t.IndexOf("?>");
+                    if (end >= 0) t = t.Substring(end + 2).TrimStart();
+                }
+
+                var doc = new XmlDocument();
+                // Try parsing as-is (has root element like <AxTable>)
+                try
+                {
+                    doc.LoadXml(t);
+                    return doc.DocumentElement;
+                }
+                catch { }
+
+                // No single root — wrap with namespace declarations for D365FO format
+                try
+                {
+                    doc.LoadXml("<Root xmlns:i=\"http://www.w3.org/2001/XMLSchema-instance\">" + t + "</Root>");
+                    return doc.DocumentElement;
+                }
+                catch { }
+
+                return null;
+            }
+            catch
+            {
+                return null;
+            }
+        }
+
+        private static string GetXmlChildText(XmlNode parent, string childName)
+        {
+            XmlNode child = parent?.SelectSingleNode(childName);
+            return child != null ? child.InnerText : null;
+        }
+
+        private static string StripXmlCData(string value)
+        {
+            if (string.IsNullOrEmpty(value)) return value;
+            string s = value.Trim();
+            if (s.StartsWith("<![CDATA[") && s.EndsWith("]]>"))
+                s = s.Substring(9, s.Length - 12);
+            return s;
+        }
+
+        // Known complex/structural XML elements that should NOT be extracted as simple properties
+        private static readonly System.Collections.Generic.HashSet<string> _xmlComplexElements =
+            new System.Collections.Generic.HashSet<string>(StringComparer.OrdinalIgnoreCase)
+            {
+                "Name", "SourceCode", "Fields", "Indexes", "FullTextIndexes",
+                "Relations", "FieldGroups", "DeleteActions", "Mappings",
+                "StateMachines", "Methods", "EnumValues", "Events",
+                "DataSources", "EntryPoints", "Privileges", "Duties",
+                "SubscriberAccessLevel"
+            };
+
+        private static System.Collections.Generic.Dictionary<string, string> ExtractXmlProperties(XmlElement root)
+        {
+            var props = new System.Collections.Generic.Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+            foreach (XmlNode child in root.ChildNodes)
+            {
+                if (child.NodeType != XmlNodeType.Element) continue;
+                string name = child.LocalName;
+                if (_xmlComplexElements.Contains(name)) continue;
+                // Only extract leaf elements (no child elements)
+                if (!child.HasChildNodes || (child.ChildNodes.Count == 1 && child.FirstChild.NodeType == XmlNodeType.Text))
+                    props[name] = child.InnerText;
+            }
+            return props.Count > 0 ? props : null;
+        }
+
+        private static System.Collections.Generic.List<FieldDto> ParseXmlFields(XmlElement root)
+        {
+            XmlNode fieldsNode = root.SelectSingleNode("Fields");
+            if (fieldsNode == null || !fieldsNode.HasChildNodes) return null;
+
+            var result = new System.Collections.Generic.List<FieldDto>();
+            foreach (XmlNode fieldNode in fieldsNode.ChildNodes)
+            {
+                if (fieldNode.NodeType != XmlNodeType.Element) continue;
+                string name = GetXmlChildText(fieldNode, "Name");
+                if (string.IsNullOrEmpty(name)) continue;
+
+                // Determine field type from i:type attribute or element name
+                string fieldType = "String";
+                XmlAttribute typeAttr = fieldNode.Attributes?["type", "http://www.w3.org/2001/XMLSchema-instance"];
+                if (typeAttr != null)
+                    fieldType = MapAxFieldType(typeAttr.Value);
+                else if (fieldNode.LocalName.StartsWith("AxTableField"))
+                    fieldType = MapAxFieldType(fieldNode.LocalName);
+
+                var dto = new FieldDto
+                {
+                    Name = name,
+                    FieldType = fieldType,
+                    ExtendedDataType = GetXmlChildText(fieldNode, "ExtendedDataType"),
+                    EnumType = GetXmlChildText(fieldNode, "EnumType"),
+                    Label = GetXmlChildText(fieldNode, "Label")
+                };
+                result.Add(dto);
+            }
+            return result.Count > 0 ? result : null;
+        }
+
+        private static string MapAxFieldType(string axType)
+        {
+            if (string.IsNullOrEmpty(axType)) return "String";
+            // Handle both "AxTableFieldString" and just "String" patterns
+            string t = axType;
+            if (t.StartsWith("AxTableField")) t = t.Substring(12);
+            switch (t.ToLowerInvariant())
+            {
+                case "string": return "String";
+                case "int": case "integer": return "Int";
+                case "int64": return "Int64";
+                case "real": return "Real";
+                case "date": return "Date";
+                case "utcdatetime": return "DateTime";
+                case "enum": return "Enum";
+                case "guid": return "Guid";
+                case "container": return "Container";
+                case "time": return "Time";
+                default: return "String";
+            }
+        }
+
+        private static System.Collections.Generic.List<IndexDto> ParseXmlIndexes(XmlElement root)
+        {
+            XmlNode indexesNode = root.SelectSingleNode("Indexes");
+            if (indexesNode == null || !indexesNode.HasChildNodes) return null;
+
+            var result = new System.Collections.Generic.List<IndexDto>();
+            foreach (XmlNode idxNode in indexesNode.ChildNodes)
+            {
+                if (idxNode.NodeType != XmlNodeType.Element) continue;
+                string name = GetXmlChildText(idxNode, "Name");
+                if (string.IsNullOrEmpty(name)) continue;
+
+                var dto = new IndexDto { Name = name };
+                string allowDup = GetXmlChildText(idxNode, "AllowDuplicates");
+                dto.AllowDuplicates = "Yes".Equals(allowDup, StringComparison.OrdinalIgnoreCase)
+                                   || "true".Equals(allowDup, StringComparison.OrdinalIgnoreCase);
+
+                XmlNode fieldsNode = idxNode.SelectSingleNode("Fields");
+                if (fieldsNode != null)
+                    foreach (XmlNode fNode in fieldsNode.ChildNodes)
+                    {
+                        if (fNode.NodeType != XmlNodeType.Element) continue;
+                        string df = fNode.SelectSingleNode("DataField")?.InnerText;
+                        if (!string.IsNullOrEmpty(df)) dto.Fields.Add(df);
+                    }
+
+                result.Add(dto);
+            }
+            return result.Count > 0 ? result : null;
+        }
+
+        private static System.Collections.Generic.List<FieldGroupDto> ParseXmlFieldGroups(XmlElement root)
+        {
+            XmlNode fgNode = root.SelectSingleNode("FieldGroups");
+            if (fgNode == null || !fgNode.HasChildNodes) return null;
+
+            var result = new System.Collections.Generic.List<FieldGroupDto>();
+            foreach (XmlNode grpNode in fgNode.ChildNodes)
+            {
+                if (grpNode.NodeType != XmlNodeType.Element) continue;
+                string name = GetXmlChildText(grpNode, "Name");
+                if (string.IsNullOrEmpty(name)) continue;
+
+                var dto = new FieldGroupDto
+                {
+                    Name = name,
+                    Label = GetXmlChildText(grpNode, "Label")
+                };
+
+                XmlNode fieldsNode = grpNode.SelectSingleNode("Fields");
+                if (fieldsNode != null)
+                    foreach (XmlNode fNode in fieldsNode.ChildNodes)
+                    {
+                        if (fNode.NodeType != XmlNodeType.Element) continue;
+                        string df = fNode.SelectSingleNode("DataField")?.InnerText;
+                        if (!string.IsNullOrEmpty(df)) dto.Fields.Add(df);
+                    }
+
+                result.Add(dto);
+            }
+            return result.Count > 0 ? result : null;
+        }
+
+        private static System.Collections.Generic.List<RelationDto> ParseXmlRelations(XmlElement root)
+        {
+            XmlNode relsNode = root.SelectSingleNode("Relations");
+            if (relsNode == null || !relsNode.HasChildNodes) return null;
+
+            var result = new System.Collections.Generic.List<RelationDto>();
+            foreach (XmlNode relNode in relsNode.ChildNodes)
+            {
+                if (relNode.NodeType != XmlNodeType.Element) continue;
+                string name = GetXmlChildText(relNode, "Name");
+                if (string.IsNullOrEmpty(name)) continue;
+
+                var dto = new RelationDto
+                {
+                    Name = name,
+                    RelatedTable = GetXmlChildText(relNode, "RelatedTable")
+                };
+
+                XmlNode constraintsNode = relNode.SelectSingleNode("Constraints");
+                if (constraintsNode != null)
+                    foreach (XmlNode cNode in constraintsNode.ChildNodes)
+                    {
+                        if (cNode.NodeType != XmlNodeType.Element) continue;
+                        string field = cNode.SelectSingleNode("Field")?.InnerText;
+                        string relatedField = cNode.SelectSingleNode("RelatedField")?.InnerText;
+                        if (!string.IsNullOrEmpty(field) || !string.IsNullOrEmpty(relatedField))
+                            dto.Constraints.Add(new RelationConstraintDto { Field = field, RelatedField = relatedField });
+                    }
+
+                result.Add(dto);
+            }
+            return result.Count > 0 ? result : null;
+        }
+
+        private static System.Collections.Generic.List<EnumValueDto> ParseXmlEnumValues(XmlElement root)
+        {
+            XmlNode valsNode = root.SelectSingleNode("EnumValues");
+            if (valsNode == null || !valsNode.HasChildNodes) return null;
+
+            var result = new System.Collections.Generic.List<EnumValueDto>();
+            foreach (XmlNode vNode in valsNode.ChildNodes)
+            {
+                if (vNode.NodeType != XmlNodeType.Element) continue;
+                string name = GetXmlChildText(vNode, "Name");
+                if (string.IsNullOrEmpty(name)) continue;
+
+                var dto = new EnumValueDto { Name = name };
+                string valStr = GetXmlChildText(vNode, "Value");
+                if (!string.IsNullOrEmpty(valStr) && int.TryParse(valStr, out int v))
+                    dto.Value = v;
+                dto.Label = GetXmlChildText(vNode, "Label");
+                result.Add(dto);
+            }
+            return result.Count > 0 ? result : null;
+        }
+
+        private static System.Collections.Generic.List<EntryPointDto> ParseXmlEntryPoints(XmlElement root)
+        {
+            XmlNode epNode = root.SelectSingleNode("EntryPoints") ?? root.SelectSingleNode("Privileges");
+            if (epNode == null || !epNode.HasChildNodes) return null;
+
+            var result = new System.Collections.Generic.List<EntryPointDto>();
+            foreach (XmlNode eNode in epNode.ChildNodes)
+            {
+                if (eNode.NodeType != XmlNodeType.Element) continue;
+                string name = GetXmlChildText(eNode, "Name");
+                if (string.IsNullOrEmpty(name)) continue;
+
+                result.Add(new EntryPointDto
+                {
+                    Name = name,
+                    ObjectName = GetXmlChildText(eNode, "ObjectName"),
+                    ObjectType = GetXmlChildText(eNode, "ObjectType"),
+                    Grant = GetXmlChildText(eNode, "Grant")
+                });
+            }
+            return result.Count > 0 ? result : null;
         }
 
         // ── Typed metadata parsing helpers ──
