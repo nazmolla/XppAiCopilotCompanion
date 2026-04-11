@@ -194,15 +194,15 @@ namespace XppAiCopilotCompanion.MetaModel
             };
 
             // Reject any formatted markup in declaration or methods
-            string xmlError = RejectIfFormattedContent(req.Declaration, "declaration")
-                           ?? RejectIfFormattedContentArray(req.Methods, "methods");
-            if (xmlError != null)
-                return SerializeResult(new MetaModelResult { Success = false, Message = xmlError });
+            string error = RejectIfFormattedContent(req.Declaration, "declaration")
+                        ?? RejectIfFormattedContentArray(req.Methods, "methods");
+            if (error != null)
+                return SerializeResult(new MetaModelResult { Success = false, Message = error });
 
             // Fallback: Copilot may stuff typed metadata into "metadata" as a JSON string
-            xmlError = NormalizeFromMetadata(body, req);
-            if (xmlError != null)
-                return SerializeResult(new MetaModelResult { Success = false, Message = xmlError });
+            error = NormalizeFromMetadata(body, req);
+            if (error != null)
+                return SerializeResult(new MetaModelResult { Success = false, Message = error });
 
             BridgeLog("create_object type=" + req.ObjectType + " name=" + req.ObjectName
                 + " props=" + (req.Properties?.Count ?? 0)
@@ -266,15 +266,15 @@ namespace XppAiCopilotCompanion.MetaModel
             };
 
             // Reject any formatted markup in declaration or methods
-            string xmlError = RejectIfFormattedContent(req.Declaration, "declaration")
-                           ?? RejectIfFormattedContentArray(req.Methods, "methods");
-            if (xmlError != null)
-                return SerializeResult(new MetaModelResult { Success = false, Message = xmlError });
+            string error = RejectIfFormattedContent(req.Declaration, "declaration")
+                        ?? RejectIfFormattedContentArray(req.Methods, "methods");
+            if (error != null)
+                return SerializeResult(new MetaModelResult { Success = false, Message = error });
 
             // Fallback: Copilot may stuff typed metadata into "metadata" as a JSON string
-            xmlError = NormalizeFromMetadata(body, req);
-            if (xmlError != null)
-                return SerializeResult(new MetaModelResult { Success = false, Message = xmlError });
+            error = NormalizeFromMetadata(body, req);
+            if (error != null)
+                return SerializeResult(new MetaModelResult { Success = false, Message = error });
 
             var result = _bridge.UpdateObject(req);
             if (!result.Success)
@@ -730,12 +730,12 @@ namespace XppAiCopilotCompanion.MetaModel
             sb.Append("]");
         }
 
-        // ── XML rejection helpers ──
+        // ── Formatted content rejection helpers ──
 
-        private static readonly string XmlRejectionMessage =
-            "ERROR: XML/CDATA content is not supported. You MUST use the strongly-typed JSON parameters "
+        private static readonly string FormattedContentRejectionMessage =
+            "ERROR: Formatted markup is not supported. You MUST use the strongly-typed JSON parameters "
           + "(objectType, objectName, properties, fields, indexes, relations, fieldGroups, enumValues, "
-          + "entryPoints, declaration, methods). Do NOT send XML, CDATA, or angle-bracketed tags. "
+          + "entryPoints, declaration, methods). Do NOT send markup, CDATA, or angle-bracketed tags. "
           + "Call xpp_read_object on an existing object to see the correct JSON format.";
 
         /// <summary>Returns an error message if the value looks like formatted markup, null otherwise.</summary>
@@ -1195,7 +1195,7 @@ namespace XppAiCopilotCompanion.MetaModel
             {
                 "objectType", "objectName", "modelName", "declaration", "methods",
                 "enumValues", "fields", "indexes", "fieldGroups", "relations",
-                "entryPoints", "properties", "action", "metadataXml"
+                "entryPoints", "properties", "action"
             };
 
         private static System.Collections.Generic.Dictionary<string, string> ExtractFlatProperties(string json)

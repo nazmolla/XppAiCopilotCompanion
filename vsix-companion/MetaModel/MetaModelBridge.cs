@@ -121,7 +121,7 @@ namespace XppAiCopilotCompanion.MetaModel
                     case "AxConfigurationKey":
                         return CreateConfigurationKey(request, saveInfo);
 
-                    // ── Extension types (no typed Create API — uses XML serialization) ──
+                    // ── Extension types (no typed Create API — uses serialization to disk) ──
                     case "AxTableExtension":
                         return CreateExtensionObject(request, saveInfo, typeof(AxTableExtension), "AxTableExtension");
                     case "AxFormExtension":
@@ -336,7 +336,7 @@ namespace XppAiCopilotCompanion.MetaModel
                 return new ReadObjectResult { Message = "File not found: " + filePath };
 
             // Derive type and name from the path structure:
-            // <root>\<Package>\<Model>\AxClass\MyClass.xml → type=AxClass, name=MyClass
+            // <root>\<Package>\<Model>\AxClass\MyClass.axclass → type=AxClass, name=MyClass
             string objectName = Path.GetFileNameWithoutExtension(filePath);
             string folder = Path.GetFileName(Path.GetDirectoryName(filePath) ?? "") ?? "";
 
@@ -1070,7 +1070,7 @@ namespace XppAiCopilotCompanion.MetaModel
         }
 
         /// <summary>
-        /// Creates an extension object by serializing it to XML and writing to the
+        /// Creates an extension object by serializing and writing to the
         /// model's metadata folder. The IMetaModelService has no Create/Update methods
         /// for extension types, so this mirrors how the D365FO VS tools create extensions.
         /// </summary>

@@ -7,7 +7,7 @@ namespace XppAiCopilotCompanion
     /// <summary>
     /// Implements IXppObjectCreationService by routing all creates through
     /// the MetaModelBridge (strongly-typed MetaModel API).
-    /// Replaces XppObjectCreationService which wrote raw XML files to disk.
+    /// Replaces XppObjectCreationService which wrote raw files to disk.
     /// </summary>
     public sealed class MetaModelObjectCreationService : IXppObjectCreationService
     {
