@@ -801,9 +801,24 @@ namespace XppAiCopilotCompanion.MetaModel
                     {
                         case '"': sb.Append('"'); break;
                         case '\\': sb.Append('\\'); break;
+                        case '/': sb.Append('/'); break;
                         case 'n': sb.Append('\n'); break;
                         case 'r': sb.Append('\r'); break;
                         case 't': sb.Append('\t'); break;
+                        case 'u':
+                            if (pos + 5 < json.Length)
+                            {
+                                string hex = json.Substring(pos + 2, 4);
+                                int cp;
+                                if (int.TryParse(hex, System.Globalization.NumberStyles.HexNumber,
+                                    System.Globalization.CultureInfo.InvariantCulture, out cp))
+                                {
+                                    sb.Append((char)cp);
+                                    pos += 6;
+                                    continue;
+                                }
+                            }
+                            sb.Append('u'); break;
                         default: sb.Append(next); break;
                     }
                     pos += 2; continue;
@@ -1144,9 +1159,24 @@ namespace XppAiCopilotCompanion.MetaModel
                         {
                             case '"': val.Append('"'); break;
                             case '\\': val.Append('\\'); break;
+                            case '/': val.Append('/'); break;
                             case 'n': val.Append('\n'); break;
                             case 'r': val.Append('\r'); break;
                             case 't': val.Append('\t'); break;
+                            case 'u':
+                                if (j + 5 < content.Length)
+                                {
+                                    string hex = content.Substring(j + 2, 4);
+                                    int cp;
+                                    if (int.TryParse(hex, System.Globalization.NumberStyles.HexNumber,
+                                        System.Globalization.CultureInfo.InvariantCulture, out cp))
+                                    {
+                                        val.Append((char)cp);
+                                        j += 6;
+                                        continue;
+                                    }
+                                }
+                                val.Append('u'); break;
                             default: val.Append(next); break;
                         }
                         j += 2; continue;

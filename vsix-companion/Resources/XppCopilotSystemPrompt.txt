@@ -110,6 +110,17 @@ CRITICAL — D365FO DATA MODEL IS HEAVILY NORMALIZED:
   DO NOT write multi-table queries based on assumptions. FIRST read each table
   involved, examine its Relations and fields, then construct the correct join chain.
 
+  JOIN DIRECTION IS CRITICAL — DO NOT GUESS:
+  In D365FO, table relations define the foreign key on the CHILD table pointing
+  to the PARENT. For example, HcmEmployment has a relation where
+  HcmEmployment.Worker = HcmWorker.RecId (NOT the reverse). If you set up the
+  join backwards, the query produces wrong results or fails.
+  The ONLY way to know the correct join direction is to READ the table that owns
+  the relation. The relation's "constraints" show: which field on THIS table maps
+  to which field on the RELATED table. NEVER reverse this.
+  ALWAYS: Read table A → check its Relations → see which field on A maps to
+  which field on B. That is the canonical join condition. Do not invent joins.
+
 VALIDTIMESTATE (DATE-EFFECTIVE TABLES):
   Many D365FO tables are date-effective — they have ValidFrom/ValidTo (utcdatetime)
   fields managed automatically by the kernel. These tables use the ValidTimeStateFieldType
@@ -240,6 +251,11 @@ Examples of what to research per task type:
   - Integration: read data entities and service contracts.
   - Query involving multiple tables: read ALL tables in the chain. Build the
     join sequence only after confirming the actual foreign key fields.
+    PAY ATTENTION TO WHICH TABLE OWNS THE RELATION — the owning table's field
+    is the foreign key pointing to the related table's RecId or alternate key.
+    The join condition MUST match the constraint direction from the metadata.
+    Example: HcmEmployment owns a relation to HcmWorker where
+    HcmEmployment.Worker = HcmWorker.RecId.
 
 Keep research focused — only read objects directly relevant to the task.
 If the injected context already gives you enough information, move to Phase 2.
