@@ -211,7 +211,11 @@ namespace XppAiCopilotCompanion.MetaModel
 
             var result = _bridge.CreateObject(req);
             if (!result.Success)
+            {
+                // Enhance error message with object context
+                result.Message = "[CreateObject " + req.ObjectType + " '" + req.ObjectName + "'] " + result.Message;
                 return SerializeResult(result);
+            }
 
             // Post-creation validation: verify object exists in project and metadata applied
             var validation = _bridge.ValidateObject(new ValidateObjectRequest
@@ -274,7 +278,11 @@ namespace XppAiCopilotCompanion.MetaModel
 
             var result = _bridge.UpdateObject(req);
             if (!result.Success)
+            {
+                // Enhance error message with object context
+                result.Message = "[UpdateObject " + req.ObjectType + " '" + req.ObjectName + "'] " + result.Message;
                 return SerializeResult(result);
+            }
 
             // Post-update validation: verify metadata was applied
             var validation = _bridge.ValidateObject(new ValidateObjectRequest
@@ -764,7 +772,10 @@ namespace XppAiCopilotCompanion.MetaModel
                 return null; // Already have typed metadata, skip fallback
 
             string metadataStr = ExtractJsonString(body, "metadata");
-            if (string.IsNullOrEmpty(metadataStr)) return null;
+            if (string.IsNullOrEmpty(metadataStr)) {
+                BridgeLog("NormalizeFromMetadata (Create): metadata string not found — will use typed parameters");
+                return null;
+            }
 
             // Reject formatted markup — this app is JSON-only
             string trimmed = metadataStr.TrimStart();
@@ -778,12 +789,19 @@ namespace XppAiCopilotCompanion.MetaModel
             }
 
             // metadataStr is a JSON string — parse typed arrays from it
-            if (req.EnumValues == null) req.EnumValues = ParseEnumValues(metadataStr);
-            if (req.Fields == null) req.Fields = ParseFields(metadataStr);
-            if (req.Indexes == null) req.Indexes = ParseIndexes(metadataStr);
-            if (req.FieldGroups == null) req.FieldGroups = ParseFieldGroups(metadataStr);
-            if (req.Relations == null) req.Relations = ParseRelations(metadataStr);
-            if (req.EntryPoints == null) req.EntryPoints = ParseEntryPoints(metadataStr);
+            int parsedCount = 0;
+            var beforeValues = req.EnumValues;
+            if (req.EnumValues == null) { req.EnumValues = ParseEnumValues(metadataStr); if (req.EnumValues != null) parsedCount++; }
+            var beforeFields = req.Fields;
+            if (req.Fields == null) { req.Fields = ParseFields(metadataStr); if (req.Fields != null) parsedCount++; }
+            var beforeIndexes = req.Indexes;
+            if (req.Indexes == null) { req.Indexes = ParseIndexes(metadataStr); if (req.Indexes != null) parsedCount++; }
+            var beforeFieldGroups = req.FieldGroups;
+            if (req.FieldGroups == null) { req.FieldGroups = ParseFieldGroups(metadataStr); if (req.FieldGroups != null) parsedCount++; }
+            var beforeRelations = req.Relations;
+            if (req.Relations == null) { req.Relations = ParseRelations(metadataStr); if (req.Relations != null) parsedCount++; }
+            var beforeEntryPoints = req.EntryPoints;
+            if (req.EntryPoints == null) { req.EntryPoints = ParseEntryPoints(metadataStr); if (req.EntryPoints != null) parsedCount++; }
 
             if (req.Properties == null)
                 req.Properties = ExtractJsonObject(metadataStr, "properties") ?? ExtractFlatProperties(metadataStr);
@@ -797,6 +815,7 @@ namespace XppAiCopilotCompanion.MetaModel
             if (string.IsNullOrEmpty(req.Declaration))
                 req.Declaration = ExtractJsonString(metadataStr, "declaration");
 
+            BridgeLog("NormalizeFromMetadata (Create): parsed " + parsedCount + " metadata sections from fallback");
             return null; // success
         }
 
@@ -806,7 +825,10 @@ namespace XppAiCopilotCompanion.MetaModel
                 return null;
 
             string metadataStr = ExtractJsonString(body, "metadata");
-            if (string.IsNullOrEmpty(metadataStr)) return null;
+            if (string.IsNullOrEmpty(metadataStr)) {
+                BridgeLog("NormalizeFromMetadata (Update): metadata string not found — will use typed parameters");
+                return null;
+            }
 
             string trimmed = metadataStr.TrimStart();
             if (trimmed.StartsWith("<"))
@@ -818,12 +840,13 @@ namespace XppAiCopilotCompanion.MetaModel
                      + "Call xpp_read_object on an existing object to see the correct JSON format.";
             }
 
-            if (req.EnumValues == null) req.EnumValues = ParseEnumValues(metadataStr);
-            if (req.Fields == null) req.Fields = ParseFields(metadataStr);
-            if (req.Indexes == null) req.Indexes = ParseIndexes(metadataStr);
-            if (req.FieldGroups == null) req.FieldGroups = ParseFieldGroups(metadataStr);
-            if (req.Relations == null) req.Relations = ParseRelations(metadataStr);
-            if (req.EntryPoints == null) req.EntryPoints = ParseEntryPoints(metadataStr);
+            int parsedCount = 0;
+            if (req.EnumValues == null) { req.EnumValues = ParseEnumValues(metadataStr); if (req.EnumValues != null) parsedCount++; }
+            if (req.Fields == null) { req.Fields = ParseFields(metadataStr); if (req.Fields != null) parsedCount++; }
+            if (req.Indexes == null) { req.Indexes = ParseIndexes(metadataStr); if (req.Indexes != null) parsedCount++; }
+            if (req.FieldGroups == null) { req.FieldGroups = ParseFieldGroups(metadataStr); if (req.FieldGroups != null) parsedCount++; }
+            if (req.Relations == null) { req.Relations = ParseRelations(metadataStr); if (req.Relations != null) parsedCount++; }
+            if (req.EntryPoints == null) { req.EntryPoints = ParseEntryPoints(metadataStr); if (req.EntryPoints != null) parsedCount++; }
 
             if (req.Properties == null)
                 req.Properties = ExtractJsonObject(metadataStr, "properties") ?? ExtractFlatProperties(metadataStr);
@@ -835,6 +858,7 @@ namespace XppAiCopilotCompanion.MetaModel
             if (string.IsNullOrEmpty(req.Declaration))
                 req.Declaration = ExtractJsonString(metadataStr, "declaration");
 
+            BridgeLog("NormalizeFromMetadata (Update): parsed " + parsedCount + " metadata sections from fallback");
             return null; // success
         }
 

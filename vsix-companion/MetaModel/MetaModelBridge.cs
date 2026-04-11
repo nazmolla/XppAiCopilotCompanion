@@ -27,6 +27,25 @@ namespace XppAiCopilotCompanion.MetaModel
     {
         private IMetaModelService _metaService;
         private IMetaModelProviders _metaProviders;
+        
+        // Cache for GetObjectModelName with 60-second TTL
+        private class CachedModelName
+        {
+            public string ModelName { get; set; }
+            public DateTime CachedAt { get; set; }
+        }
+        private System.Collections.Generic.Dictionary<string, CachedModelName> _objectModelNameCache =
+            new System.Collections.Generic.Dictionary<string, CachedModelName>();
+        private const int ModelNameCacheTtlSeconds = 60;
+        
+        // Cache for ListProjectItems with 60-second TTL
+        private class CachedProjectItems
+        {
+            public System.Collections.Generic.List<ProjectItemInfo> Items { get; set; }
+            public DateTime CachedAt { get; set; }
+        }
+        private CachedProjectItems _projectItemsCache;
+        private const int ProjectItemsCacheTtlSeconds = 60;
 
         private IMetaModelService MetaService
         {
@@ -380,44 +399,64 @@ namespace XppAiCopilotCompanion.MetaModel
 
             if (req.Fields != null)
             {
+                // Build HashSet for O(1) lookups instead of O(n) .Any() searches
+                var fieldNameSet = readResult.Fields != null
+                    ? new System.Collections.Generic.HashSet<string>(
+                        readResult.Fields.Select(x => x.Name ?? ""),
+                        StringComparer.OrdinalIgnoreCase)
+                    : new System.Collections.Generic.HashSet<string>(StringComparer.OrdinalIgnoreCase);
+                
                 foreach (var f in req.Fields)
                 {
-                    bool found = readResult.Fields != null &&
-                        readResult.Fields.Any(x => string.Equals(x.Name, f.Name, StringComparison.OrdinalIgnoreCase));
-                    if (!found)
+                    if (!fieldNameSet.Contains(f.Name ?? ""))
                         mismatches.Add("Field '" + f.Name + "': expected to exist, not found");
                 }
             }
 
             if (req.EnumValues != null)
             {
+                // Build HashSet for O(1) lookups instead of O(n) .Any() searches
+                var enumNameSet = readResult.EnumValues != null
+                    ? new System.Collections.Generic.HashSet<string>(
+                        readResult.EnumValues.Select(x => x.Name ?? ""),
+                        StringComparer.OrdinalIgnoreCase)
+                    : new System.Collections.Generic.HashSet<string>(StringComparer.OrdinalIgnoreCase);
+                
                 foreach (var ev in req.EnumValues)
                 {
-                    bool found = readResult.EnumValues != null &&
-                        readResult.EnumValues.Any(x => string.Equals(x.Name, ev.Name, StringComparison.OrdinalIgnoreCase));
-                    if (!found)
+                    if (!enumNameSet.Contains(ev.Name ?? ""))
                         mismatches.Add("EnumValue '" + ev.Name + "': expected to exist, not found");
                 }
             }
 
             if (req.Indexes != null)
             {
+                // Build HashSet for O(1) lookups instead of O(n) .Any() searches
+                var indexNameSet = readResult.Indexes != null
+                    ? new System.Collections.Generic.HashSet<string>(
+                        readResult.Indexes.Select(x => x.Name ?? ""),
+                        StringComparer.OrdinalIgnoreCase)
+                    : new System.Collections.Generic.HashSet<string>(StringComparer.OrdinalIgnoreCase);
+                
                 foreach (var idx in req.Indexes)
                 {
-                    bool found = readResult.Indexes != null &&
-                        readResult.Indexes.Any(x => string.Equals(x.Name, idx.Name, StringComparison.OrdinalIgnoreCase));
-                    if (!found)
+                    if (!indexNameSet.Contains(idx.Name ?? ""))
                         mismatches.Add("Index '" + idx.Name + "': expected to exist, not found");
                 }
             }
 
             if (req.Relations != null)
             {
+                // Build HashSet for O(1) lookups instead of O(n) .Any() searches
+                var relationNameSet = readResult.Relations != null
+                    ? new System.Collections.Generic.HashSet<string>(
+                        readResult.Relations.Select(x => x.Name ?? ""),
+                        StringComparer.OrdinalIgnoreCase)
+                    : new System.Collections.Generic.HashSet<string>(StringComparer.OrdinalIgnoreCase);
+                
                 foreach (var rel in req.Relations)
                 {
-                    bool found = readResult.Relations != null &&
-                        readResult.Relations.Any(x => string.Equals(x.Name, rel.Name, StringComparison.OrdinalIgnoreCase));
-                    if (!found)
+                    if (!relationNameSet.Contains(rel.Name ?? ""))
                         mismatches.Add("Relation '" + rel.Name + "': expected to exist, not found");
                 }
             }
@@ -483,12 +522,14 @@ namespace XppAiCopilotCompanion.MetaModel
             }
             catch (Exception ex)
             {
-                result.Message = "Search error: " + ex.Message;
+                string svcContext = MetaService == null ? "[MetaService unavailable]" : "[MetaService active]";
+                result.Message = "Search error in FindObject (searching for '" + objectName + "' in type '" + objectType + "'): " + svcContext + " - " + ex.Message;
             }
 
             if (result.Matches.Count == 0)
                 result.Message = "No objects found matching '" + objectName + "'."
-                    + (string.IsNullOrEmpty(objectType) ? "" : " (type: " + objectType + ")");
+                    + (string.IsNullOrEmpty(objectType) ? "" : " (type: " + objectType + ")")
+                    + " Found in " + result.Matches.Count + " type(s).";
 
             return result;
         }
@@ -722,6 +763,13 @@ namespace XppAiCopilotCompanion.MetaModel
         public List<ProjectItemInfo> ListProjectItems()
         {
             ThreadHelper.ThrowIfNotOnUIThread();
+            
+            // Check cache first
+            if (_projectItemsCache != null && (DateTime.Now - _projectItemsCache.CachedAt).TotalSeconds < ProjectItemsCacheTtlSeconds)
+            {
+                return _projectItemsCache.Items;
+            }
+            
             var items = new List<ProjectItemInfo>();
 
             try
@@ -748,6 +796,13 @@ namespace XppAiCopilotCompanion.MetaModel
                 }
             }
             catch { }
+
+            // Cache the result
+            _projectItemsCache = new CachedProjectItems
+            {
+                Items = items,
+                CachedAt = DateTime.Now
+            };
 
             return items;
         }
@@ -1291,6 +1346,24 @@ namespace XppAiCopilotCompanion.MetaModel
 
         private string GetObjectModelName(string objectType, string objectName)
         {
+            // Create cache key
+            string cacheKey = objectType + ":" + objectName;
+            
+            // Check cache first
+            if (_objectModelNameCache.TryGetValue(cacheKey, out CachedModelName cached))
+            {
+                // Check if cache is still fresh (within TTL)
+                if ((DateTime.Now - cached.CachedAt).TotalSeconds < ModelNameCacheTtlSeconds)
+                {
+                    return cached.ModelName;
+                }
+                else
+                {
+                    // Expired cache entry - remove it
+                    _objectModelNameCache.Remove(cacheKey);
+                }
+            }
+            
             try
             {
                 ModelInfo modelInfo = null;
@@ -1305,7 +1378,16 @@ namespace XppAiCopilotCompanion.MetaModel
                     case "AxQuery": modelInfo = MetaService.GetQueryModelInfo(objectName).FirstOrDefault(); break;
                 }
 
-                return modelInfo?.Name;
+                string modelName = modelInfo?.Name;
+                
+                // Cache the result
+                _objectModelNameCache[cacheKey] = new CachedModelName
+                {
+                    ModelName = modelName,
+                    CachedAt = DateTime.Now
+                };
+                
+                return modelName;
             }
             catch { return null; }
         }
