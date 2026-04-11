@@ -159,7 +159,7 @@ namespace XppAiCopilotCompanion.MetaModel
                     case "AxEnum":
                         return UpdateEnum(request);
                     default:
-                        return UpdateGenericByXml(request);
+                        return UpdateGenericByTypedApi(request);
                 }
             }
             catch (Exception ex)
@@ -449,27 +449,36 @@ namespace XppAiCopilotCompanion.MetaModel
                 var typeSearchers = GetTypeSearchers(objectType);
                 foreach (var searcher in typeSearchers)
                 {
-                    foreach (string name in searcher.GetNames())
+                    try
                     {
-                        bool match = exactMatch
-                            ? name.Equals(objectName, StringComparison.OrdinalIgnoreCase)
-                            : name.IndexOf(objectName, StringComparison.OrdinalIgnoreCase) >= 0;
-
-                        if (match)
+                        foreach (string name in searcher.GetNames())
                         {
-                            string modelName = GetObjectModelName(searcher.TypeName, name);
-                            result.Matches.Add(new FoundObject
-                            {
-                                ObjectType = searcher.TypeName,
-                                ObjectName = name,
-                                ModelName = modelName,
-                                IsCustom = IsCustomModel(modelName)
-                            });
+                            bool match = exactMatch
+                                ? name.Equals(objectName, StringComparison.OrdinalIgnoreCase)
+                                : name.IndexOf(objectName, StringComparison.OrdinalIgnoreCase) >= 0;
 
-                            if (result.Matches.Count >= 100) break;
+                            if (match)
+                            {
+                                string modelName = GetObjectModelName(searcher.TypeName, name);
+                                result.Matches.Add(new FoundObject
+                                {
+                                    ObjectType = searcher.TypeName,
+                                    ObjectName = name,
+                                    ModelName = modelName,
+                                    IsCustom = IsCustomModel(modelName)
+                                });
+
+                                if (result.Matches.Count >= 100) break;
+                            }
                         }
+                        if (result.Matches.Count >= 100) break;
                     }
-                    if (result.Matches.Count >= 100) break;
+                    catch (Exception typeEx)
+                    {
+                        // Log per-type error but continue searching other types
+                        // This allows partial results even if one metadata extractor fails
+                        System.Diagnostics.Debug.WriteLine("FindObject type search error for type '" + searcher.TypeName + "': " + typeEx.Message);
+                    }
                 }
             }
             catch (Exception ex)
@@ -797,7 +806,14 @@ namespace XppAiCopilotCompanion.MetaModel
                 axTable.Declaration = StripCData(req.Declaration);
 
             AddMethods(axTable.Methods, req.Methods);
-            ApplyTypedMetadata(axTable, req);
+            try
+            {
+                ApplyTypedMetadata(axTable, req);
+            }
+            catch (Exception ex)
+            {
+                return Fail("ApplyTypedMetadata failed for AxTable '" + req.ObjectName + "': " + ex.Message);
+            }
             MetaService.CreateTable(axTable, saveInfo);
             AddToProjectIfActive("AxTable", req.ObjectName);
             return Ok("Created AxTable '" + req.ObjectName + "'.");
@@ -810,7 +826,14 @@ namespace XppAiCopilotCompanion.MetaModel
                 axForm.SourceCode.Declaration = StripCData(req.Declaration);
 
             AddMethods(axForm.Methods, req.Methods);
-            ApplyTypedMetadata(axForm, req);
+            try
+            {
+                ApplyTypedMetadata(axForm, req);
+            }
+            catch (Exception ex)
+            {
+                return Fail("ApplyTypedMetadata failed for AxForm '" + req.ObjectName + "': " + ex.Message);
+            }
             MetaService.CreateForm(axForm, saveInfo);
             AddToProjectIfActive("AxForm", req.ObjectName);
             return Ok("Created AxForm '" + req.ObjectName + "'.");
@@ -819,7 +842,14 @@ namespace XppAiCopilotCompanion.MetaModel
         private MetaModelResult CreateEdt(CreateObjectRequest req, ModelSaveInfo saveInfo)
         {
             var axEdt = new AxEdtString { Name = req.ObjectName };
-            ApplyTypedMetadata(axEdt, req);
+            try
+            {
+                ApplyTypedMetadata(axEdt, req);
+            }
+            catch (Exception ex)
+            {
+                return Fail("ApplyTypedMetadata failed for AxEdt '" + req.ObjectName + "': " + ex.Message);
+            }
             MetaService.CreateExtendedDataType(axEdt, saveInfo);
             AddToProjectIfActive("AxEdt", req.ObjectName);
             return Ok("Created AxEdt '" + req.ObjectName + "'.");
@@ -828,7 +858,14 @@ namespace XppAiCopilotCompanion.MetaModel
         private MetaModelResult CreateEnum(CreateObjectRequest req, ModelSaveInfo saveInfo)
         {
             var axEnum = new AxEnum { Name = req.ObjectName };
-            ApplyTypedMetadata(axEnum, req);
+            try
+            {
+                ApplyTypedMetadata(axEnum, req);
+            }
+            catch (Exception ex)
+            {
+                return Fail("ApplyTypedMetadata failed for AxEnum '" + req.ObjectName + "': " + ex.Message);
+            }
             MetaService.CreateEnum(axEnum, saveInfo);
             AddToProjectIfActive("AxEnum", req.ObjectName);
             return Ok("Created AxEnum '" + req.ObjectName + "'.");
@@ -1090,7 +1127,14 @@ namespace XppAiCopilotCompanion.MetaModel
                 tbl.Declaration = StripCData(req.Declaration);
 
             UpdateMethods(tbl.Methods, req.Methods, req.RemoveMethodNames);
-            ApplyTypedMetadata(tbl, req);
+            try
+            {
+                ApplyTypedMetadata(tbl, req);
+            }
+            catch (Exception ex)
+            {
+                return Fail("ApplyTypedMetadata failed for AxTable '" + req.ObjectName + "': " + ex.Message);
+            }
             MetaService.UpdateTable(tbl, saveInfo);
             return Ok("Updated AxTable '" + req.ObjectName + "'.");
         }
@@ -1140,7 +1184,7 @@ namespace XppAiCopilotCompanion.MetaModel
             return Ok("Updated AxEnum '" + req.ObjectName + "'.");
         }
 
-        private MetaModelResult UpdateGenericByXml(UpdateObjectRequest req)
+        private MetaModelResult UpdateGenericByTypedApi(UpdateObjectRequest req)
         {
             return Fail("Update for type '" + req.ObjectType + "' is not yet supported via the typed API. "
                 + "Supported types: AxClass, AxTable, AxForm, AxEdt, AxEnum.");

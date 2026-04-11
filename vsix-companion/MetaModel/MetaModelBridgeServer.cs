@@ -193,14 +193,14 @@ namespace XppAiCopilotCompanion.MetaModel
                 EntryPoints = ParseEntryPoints(body)
             };
 
-            // Reject any XML in declaration or methods
-            string xmlError = RejectIfXml(req.Declaration, "declaration")
-                           ?? RejectIfXmlArray(req.Methods, "methods");
+            // Reject any formatted markup in declaration or methods
+            string xmlError = RejectIfFormattedContent(req.Declaration, "declaration")
+                           ?? RejectIfFormattedContentArray(req.Methods, "methods");
             if (xmlError != null)
                 return SerializeResult(new MetaModelResult { Success = false, Message = xmlError });
 
-            // Fallback: Copilot may stuff typed metadata into "metadataXml" as a JSON string
-            xmlError = NormalizeFromMetadataXml(body, req);
+            // Fallback: Copilot may stuff typed metadata into "metadata" as a JSON string
+            xmlError = NormalizeFromMetadata(body, req);
             if (xmlError != null)
                 return SerializeResult(new MetaModelResult { Success = false, Message = xmlError });
 
@@ -261,14 +261,14 @@ namespace XppAiCopilotCompanion.MetaModel
                 EntryPoints = ParseEntryPoints(body)
             };
 
-            // Reject any XML in declaration or methods
-            string xmlError = RejectIfXml(req.Declaration, "declaration")
-                           ?? RejectIfXmlArray(req.Methods, "methods");
+            // Reject any formatted markup in declaration or methods
+            string xmlError = RejectIfFormattedContent(req.Declaration, "declaration")
+                           ?? RejectIfFormattedContentArray(req.Methods, "methods");
             if (xmlError != null)
                 return SerializeResult(new MetaModelResult { Success = false, Message = xmlError });
 
-            // Fallback: Copilot may stuff typed metadata into "metadataXml" as a JSON string
-            xmlError = NormalizeFromMetadataXml(body, req);
+            // Fallback: Copilot may stuff typed metadata into "metadata" as a JSON string
+            xmlError = NormalizeFromMetadata(body, req);
             if (xmlError != null)
                 return SerializeResult(new MetaModelResult { Success = false, Message = xmlError });
 
@@ -730,50 +730,50 @@ namespace XppAiCopilotCompanion.MetaModel
           + "entryPoints, declaration, methods). Do NOT send XML, CDATA, or angle-bracketed tags. "
           + "Call xpp_read_object on an existing object to see the correct JSON format.";
 
-        /// <summary>Returns an error message if the value looks like XML/CDATA, null otherwise.</summary>
-        private static string RejectIfXml(string value, string paramName)
+        /// <summary>Returns an error message if the value looks like formatted markup, null otherwise.</summary>
+        private static string RejectIfFormattedContent(string value, string paramName)
         {
             if (string.IsNullOrEmpty(value)) return null;
             string t = value.TrimStart();
-            if (t.StartsWith("<![CDATA[") || t.StartsWith("<?xml") || t.StartsWith("<Ax"))
-                return "ERROR: The '" + paramName + "' parameter contains XML/CDATA. " + XmlRejectionMessage;
+            if (t.StartsWith("<![CDATA[") || t.StartsWith("<?") || t.StartsWith("<Ax"))
+                return "ERROR: The '" + paramName + "' parameter contains markup. " + FormattedContentRejectionMessage;
             return null;
         }
 
-        /// <summary>Returns an error if any array element looks like XML/CDATA.</summary>
-        private static string RejectIfXmlArray(string[] values, string paramName)
+        /// <summary>Returns an error if any array element looks like formatted markup.</summary>
+        private static string RejectIfFormattedContentArray(string[] values, string paramName)
         {
             if (values == null) return null;
             foreach (string v in values)
             {
-                string err = RejectIfXml(v, paramName);
+                string err = RejectIfFormattedContent(v, paramName);
                 if (err != null) return err;
             }
             return null;
         }
 
-        // ── metadataXml normalization fallback (JSON only — XML is rejected) ──
+        // ── metadata normalization fallback (JSON only) ──
 
         /// <summary>
-        /// If Copilot sends a "metadataXml" parameter it must contain JSON, not XML.
-        /// XML content is rejected with a clear error message.
+        /// If Copilot sends a "metadata" parameter it must contain JSON.
+        /// Formatted markup is rejected with a clear error message.
         /// </summary>
-        private string NormalizeFromMetadataXml(string body, CreateObjectRequest req)
+        private string NormalizeFromMetadata(string body, CreateObjectRequest req)
         {
             if (req.Properties != null || req.EnumValues != null || req.Fields != null)
                 return null; // Already have typed metadata, skip fallback
 
-            string metadataStr = ExtractJsonString(body, "metadataXml");
+            string metadataStr = ExtractJsonString(body, "metadata");
             if (string.IsNullOrEmpty(metadataStr)) return null;
 
-            // Reject XML — this app is JSON-only
+            // Reject formatted markup — this app is JSON-only
             string trimmed = metadataStr.TrimStart();
             if (trimmed.StartsWith("<"))
             {
-                BridgeLog("REJECTED XML in metadataXml — app is JSON-only");
-                return "ERROR: XML content is not supported. You MUST use the strongly-typed JSON parameters "
+                BridgeLog("REJECTED formatted markup in metadata — app is JSON-only");
+                return "ERROR: Formatted markup is not supported. You MUST use the strongly-typed JSON parameters "
                      + "(objectType, objectName, properties, fields, indexes, relations, fieldGroups, enumValues, "
-                     + "entryPoints, declaration, methods). Do NOT send XML, CDATA, or angle-bracketed tags. "
+                     + "entryPoints, declaration, methods). Do NOT send markup, CDATA, or angle-bracketed tags. "
                      + "Call xpp_read_object on an existing object to see the correct JSON format.";
             }
 
@@ -800,21 +800,21 @@ namespace XppAiCopilotCompanion.MetaModel
             return null; // success
         }
 
-        private string NormalizeFromMetadataXml(string body, UpdateObjectRequest req)
+        private string NormalizeFromMetadata(string body, UpdateObjectRequest req)
         {
             if (req.Properties != null || req.EnumValues != null || req.Fields != null)
                 return null;
 
-            string metadataStr = ExtractJsonString(body, "metadataXml");
+            string metadataStr = ExtractJsonString(body, "metadata");
             if (string.IsNullOrEmpty(metadataStr)) return null;
 
             string trimmed = metadataStr.TrimStart();
             if (trimmed.StartsWith("<"))
             {
-                BridgeLog("REJECTED XML in metadataXml (update) — app is JSON-only");
-                return "ERROR: XML content is not supported. You MUST use the strongly-typed JSON parameters "
+                BridgeLog("REJECTED formatted markup in metadata (update) — app is JSON-only");
+                return "ERROR: Formatted markup is not supported. You MUST use the strongly-typed JSON parameters "
                      + "(objectType, objectName, properties, fields, indexes, relations, fieldGroups, enumValues, "
-                     + "entryPoints, declaration, methods). Do NOT send XML, CDATA, or angle-bracketed tags. "
+                     + "entryPoints, declaration, methods). Do NOT send markup, CDATA, or angle-bracketed tags. "
                      + "Call xpp_read_object on an existing object to see the correct JSON format.";
             }
 
@@ -1005,12 +1005,16 @@ namespace XppAiCopilotCompanion.MetaModel
         private System.Collections.Generic.List<EnumValueDto> ParseEnumValues(string body)
         {
             string arrayJson = ExtractJsonArray(body, "enumValues");
-            if (arrayJson == null) return null;
+            if (arrayJson == null) {
+                BridgeLog("ParseEnumValues: enumValues array not found in body");
+                return null;
+            }
             var result = new System.Collections.Generic.List<EnumValueDto>();
+            int skipped = 0;
             foreach (string obj in SplitJsonObjects(arrayJson))
             {
                 string name = ExtractJsonString(obj, "name");
-                if (string.IsNullOrEmpty(name)) continue;
+                if (string.IsNullOrEmpty(name)) { skipped++; continue; }
                 var dto = new EnumValueDto { Name = name };
                 string valStr = ExtractJsonString(obj, "value");
                 if (!string.IsNullOrEmpty(valStr) && int.TryParse(valStr, out int v))
@@ -1018,18 +1022,24 @@ namespace XppAiCopilotCompanion.MetaModel
                 dto.Label = ExtractJsonString(obj, "label");
                 result.Add(dto);
             }
+            if (skipped > 0) BridgeLog("ParseEnumValues: skipped " + skipped + " items with missing name");
+            BridgeLog("ParseEnumValues: parsed " + result.Count + " enum values");
             return result.Count > 0 ? result : null;
         }
 
         private System.Collections.Generic.List<FieldDto> ParseFields(string body)
         {
             string arrayJson = ExtractJsonArray(body, "fields");
-            if (arrayJson == null) return null;
+            if (arrayJson == null) {
+                BridgeLog("ParseFields: fields array not found in body");
+                return null;
+            }
             var result = new System.Collections.Generic.List<FieldDto>();
+            int skipped = 0;
             foreach (string obj in SplitJsonObjects(arrayJson))
             {
                 string name = ExtractJsonString(obj, "name");
-                if (string.IsNullOrEmpty(name)) continue;
+                if (string.IsNullOrEmpty(name)) { skipped++; continue; }
                 result.Add(new FieldDto
                 {
                     Name = name,
@@ -1039,18 +1049,24 @@ namespace XppAiCopilotCompanion.MetaModel
                     Label = ExtractJsonString(obj, "label")
                 });
             }
+            if (skipped > 0) BridgeLog("ParseFields: skipped " + skipped + " items with missing name");
+            BridgeLog("ParseFields: parsed " + result.Count + " fields");
             return result.Count > 0 ? result : null;
         }
 
         private System.Collections.Generic.List<IndexDto> ParseIndexes(string body)
         {
             string arrayJson = ExtractJsonArray(body, "indexes");
-            if (arrayJson == null) return null;
+            if (arrayJson == null) {
+                BridgeLog("ParseIndexes: indexes array not found in body");
+                return null;
+            }
             var result = new System.Collections.Generic.List<IndexDto>();
+            int skipped = 0;
             foreach (string obj in SplitJsonObjects(arrayJson))
             {
                 string name = ExtractJsonString(obj, "name");
-                if (string.IsNullOrEmpty(name)) continue;
+                if (string.IsNullOrEmpty(name)) { skipped++; continue; }
                 var dto = new IndexDto { Name = name };
                 string dup = ExtractJsonString(obj, "allowDuplicates");
                 dto.AllowDuplicates = "true".Equals(dup, StringComparison.OrdinalIgnoreCase);
@@ -1058,35 +1074,47 @@ namespace XppAiCopilotCompanion.MetaModel
                 if (fields != null) dto.Fields.AddRange(fields);
                 result.Add(dto);
             }
+            if (skipped > 0) BridgeLog("ParseIndexes: skipped " + skipped + " items with missing name");
+            BridgeLog("ParseIndexes: parsed " + result.Count + " indexes");
             return result.Count > 0 ? result : null;
         }
 
         private System.Collections.Generic.List<FieldGroupDto> ParseFieldGroups(string body)
         {
             string arrayJson = ExtractJsonArray(body, "fieldGroups");
-            if (arrayJson == null) return null;
+            if (arrayJson == null) {
+                BridgeLog("ParseFieldGroups: fieldGroups array not found in body");
+                return null;
+            }
             var result = new System.Collections.Generic.List<FieldGroupDto>();
+            int skipped = 0;
             foreach (string obj in SplitJsonObjects(arrayJson))
             {
                 string name = ExtractJsonString(obj, "name");
-                if (string.IsNullOrEmpty(name)) continue;
+                if (string.IsNullOrEmpty(name)) { skipped++; continue; }
                 var dto = new FieldGroupDto { Name = name, Label = ExtractJsonString(obj, "label") };
                 string[] fields = ExtractJsonStringArray(obj, "fields");
                 if (fields != null) dto.Fields.AddRange(fields);
                 result.Add(dto);
             }
+            if (skipped > 0) BridgeLog("ParseFieldGroups: skipped " + skipped + " items with missing name");
+            BridgeLog("ParseFieldGroups: parsed " + result.Count + " field groups");
             return result.Count > 0 ? result : null;
         }
 
         private System.Collections.Generic.List<RelationDto> ParseRelations(string body)
         {
             string arrayJson = ExtractJsonArray(body, "relations");
-            if (arrayJson == null) return null;
+            if (arrayJson == null) {
+                BridgeLog("ParseRelations: relations array not found in body");
+                return null;
+            }
             var result = new System.Collections.Generic.List<RelationDto>();
+            int skipped = 0;
             foreach (string obj in SplitJsonObjects(arrayJson))
             {
                 string name = ExtractJsonString(obj, "name");
-                if (string.IsNullOrEmpty(name)) continue;
+                if (string.IsNullOrEmpty(name)) { skipped++; continue; }
                 var dto = new RelationDto
                 {
                     Name = name,
@@ -1106,6 +1134,8 @@ namespace XppAiCopilotCompanion.MetaModel
                 }
                 result.Add(dto);
             }
+            if (skipped > 0) BridgeLog("ParseRelations: skipped " + skipped + " items with missing name");
+            BridgeLog("ParseRelations: parsed " + result.Count + " relations");
             return result.Count > 0 ? result : null;
         }
 
@@ -1129,7 +1159,7 @@ namespace XppAiCopilotCompanion.MetaModel
             return result.Count > 0 ? result : null;
         }
 
-        // ── Flat-property extraction for metadataXml fallback ──
+        // ── Flat-property extraction for metadata fallback ──
 
         /// <summary>
         /// Scans a JSON object for all top-level key-value pairs whose values are simple types
