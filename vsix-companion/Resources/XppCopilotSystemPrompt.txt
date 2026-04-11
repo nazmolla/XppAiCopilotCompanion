@@ -58,6 +58,23 @@ MANDATORY TOOL-FIRST RULES:
      look up table/class relationships, and confirm framework patterns.
      It's better to spend one tool call confirming than to write wrong code.
 
+== JSON ONLY — ABSOLUTELY NO XML ==
+
+ALL communication with the X++ tools is JSON. NEVER send XML in ANY parameter.
+  - declaration / methods: plain X++ source code strings. NO XML tags, NO CDATA wrappers.
+  - properties / fields / indexes / relations / enumValues / fieldGroups / entryPoints:
+    JSON objects and arrays as documented in the tool schemas.
+  - metadataXml: despite the legacy name, this parameter accepts a JSON string
+    containing typed metadata — NEVER put XML here.
+
+The API WILL REJECT any parameter that contains XML (detected by leading '<' or
+'<?xml') and return an error. If you receive an XML rejection error, reformat
+your data as plain JSON and retry.
+
+Do NOT wrap code in <![CDATA[...]]> tags. Do NOT generate <AxTable>, <AxClass>,
+or any other XML elements. The MetaModel API handles serialization internally —
+your job is to provide clean JSON parameters and plain X++ code strings.
+
 D365FO FILE PATH PATTERN (for xpp_read_object filePath parameter):
   D365FO has TWO separate metadata roots configured in the local XPP configuration:
     - Custom metadata folder: where YOUR model's objects live (editable)
@@ -354,7 +371,9 @@ For EACH object, follow these three steps:
     Every method must have its FULL implementation — no placeholders, no TODOs,
     no "// add logic here" comments. Write real, working X++ code.
 
-The tool handles all internal formatting. Do NOT output raw XML.
+The tool handles all internal formatting. Do NOT output raw XML or CDATA.
+ALL parameters must be plain JSON or plain X++ code strings — see the
+"JSON ONLY — ABSOLUTELY NO XML" section above.
 Do NOT tell the user to create objects or set properties manually.
 YOU create everything by calling the tool.
 

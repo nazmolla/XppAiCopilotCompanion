@@ -24,7 +24,7 @@ namespace XppAiCopilotCompanion.McpServer
   ""tools"": [
     {
       ""name"": ""xpp_create_object"",
-      ""description"": ""Creates a new D365FO X++ metadata object using the MetaModel API. CRITICAL: This is the ONLY correct way to create X++ objects. NEVER create metadata XML files directly via terminal, file writes, or Set-Content — that bypasses the MetaModel API and produces corrupted/unregistered objects. Use 'properties' for scalar metadata (Label, IsExtensible, TableGroup, etc.), 'enumValues' for AxEnum values, 'fields'/'indexes'/'fieldGroups'/'relations' for AxTable structure, 'entryPoints' for security types. Use xpp_read_object on existing objects to see the exact JSON format. The object is automatically added to the active VS project."",
+      ""description"": ""Creates a new D365FO X++ metadata object using the MetaModel API. CRITICAL: This is the ONLY correct way to create X++ objects. NEVER create metadata files directly via terminal, file writes, or Set-Content — that bypasses the MetaModel API and produces corrupted/unregistered objects. ALL parameters MUST be JSON — any XML or CDATA content will be REJECTED with an error. Use 'properties' for scalar metadata (Label, IsExtensible, TableGroup, etc.), 'enumValues' for AxEnum values, 'fields'/'indexes'/'fieldGroups'/'relations' for AxTable structure, 'entryPoints' for security types. Use xpp_read_object on existing objects to see the exact JSON format. The object is automatically added to the active VS project."",
       ""inputSchema"": {
         ""type"": ""object"",
         ""properties"": {
@@ -34,8 +34,8 @@ namespace XppAiCopilotCompanion.McpServer
             ""enum"": [""AxClass"", ""AxTable"", ""AxView"", ""AxDataEntityView"", ""AxMap"", ""AxEdt"", ""AxEnum"", ""AxForm"", ""AxTile"", ""AxMenu"", ""AxMenuItemDisplay"", ""AxMenuItemOutput"", ""AxMenuItemAction"", ""AxQuery"", ""AxSecurityPrivilege"", ""AxSecurityDuty"", ""AxSecurityRole"", ""AxService"", ""AxServiceGroup"", ""AxConfigurationKey"", ""AxTableExtension"", ""AxFormExtension"", ""AxEnumExtension"", ""AxEdtExtension"", ""AxViewExtension"", ""AxMenuExtension"", ""AxMenuItemDisplayExtension"", ""AxMenuItemOutputExtension"", ""AxMenuItemActionExtension"", ""AxQuerySimpleExtension"", ""AxSecurityDutyExtension"", ""AxSecurityRoleExtension""]
           },
           ""objectName"": { ""type"": ""string"", ""description"": ""Name of the object. Must follow the model's naming prefix convention."" },
-          ""declaration"": { ""type"": ""string"", ""description"": ""Raw X++ class/table declaration code block. Do NOT wrap in CDATA — the API handles that automatically."" },
-          ""methods"": { ""type"": ""array"", ""items"": { ""type"": ""string"" }, ""description"": ""Array of complete X++ method source strings. Raw code only, no CDATA wrappers."" },
+          ""declaration"": { ""type"": ""string"", ""description"": ""Raw X++ class/table declaration code block. Plain code only — NO XML, NO CDATA wrappers."" },
+          ""methods"": { ""type"": ""array"", ""items"": { ""type"": ""string"" }, ""description"": ""Array of complete X++ method source strings. Plain code only — NO XML, NO CDATA wrappers. Any XML content will be rejected with an error."" },
           ""properties"": { ""type"": ""object"", ""description"": ""Key-value pairs for scalar metadata properties set via reflection. Keys are property names (e.g. Label, IsExtensible, TableGroup, ObjectType, Object, FormRef). Values are strings — type coercion is automatic (bool, int, enum). Use xpp_read_object on an existing object to discover available property names."" },
           ""enumValues"": { ""type"": ""array"", ""items"": { ""type"": ""object"", ""properties"": { ""name"": { ""type"": ""string"" }, ""value"": { ""type"": ""integer"" }, ""label"": { ""type"": ""string"" } }, ""required"": [""name"", ""value""] }, ""description"": ""Enum values for AxEnum or AxEnumExtension. Each entry creates an AxEnumValue with Name, Value (integer), and optional Label."" },
           ""fields"": { ""type"": ""array"", ""items"": { ""type"": ""object"", ""properties"": { ""name"": { ""type"": ""string"" }, ""fieldType"": { ""type"": ""string"", ""enum"": [""String"", ""Int"", ""Real"", ""Date"", ""DateTime"", ""Enum"", ""Int64"", ""Container"", ""Guid"", ""Time""] }, ""extendedDataType"": { ""type"": ""string"" }, ""enumType"": { ""type"": ""string"" }, ""label"": { ""type"": ""string"" } }, ""required"": [""name"", ""fieldType""] }, ""description"": ""Table fields for AxTable or AxTableExtension. fieldType determines the field class (AxTableFieldString, AxTableFieldInt, etc.)."" },
@@ -50,27 +50,27 @@ namespace XppAiCopilotCompanion.McpServer
     },
     {
       ""name"": ""xpp_read_object"",
-      ""description"": ""Reads a D365FO X++ object by type and name using the MetaModel API. CRITICAL: This is the ONLY correct way to read X++ objects. NEVER read metadata XML files directly via Get-Content or terminal commands. Returns declaration, methods, and strongly-typed metadata (properties, enumValues, fields, indexes, fieldGroups, relations) in the SAME JSON format accepted by xpp_create_object and xpp_update_object — so you can read an existing object and use its metadata directly as a template for creating or modifying objects. Also returns model name and editability. For objects not supported by the typed API, pass filePath instead."",
+      ""description"": ""Reads a D365FO X++ object by type and name using the MetaModel API. CRITICAL: This is the ONLY correct way to read X++ objects. NEVER read metadata files directly via Get-Content or terminal commands. Returns declaration, methods, and strongly-typed metadata (properties, enumValues, fields, indexes, fieldGroups, relations) in JSON format — use this output directly as a template for creating or modifying objects. Also returns model name and editability. For objects not supported by the typed API, pass filePath instead."",
       ""inputSchema"": {
         ""type"": ""object"",
         ""properties"": {
           ""objectType"": { ""type"": ""string"", ""description"": ""The object type (AxClass, AxTable, AxForm, AxEnum, AxEdt, AxView, AxQuery)."" },
           ""objectName"": { ""type"": ""string"", ""description"": ""The object name."" },
-          ""filePath"": { ""type"": ""string"", ""description"": ""Absolute path to the metadata XML file. Use this for types not supported by the typed API, or when you have the path."" }
+          ""filePath"": { ""type"": ""string"", ""description"": ""Absolute path to the metadata file. Use this for types not supported by the typed API, or when you have the path."" }
         },
         ""required"": []
       }
     },
     {
       ""name"": ""xpp_update_object"",
-      ""description"": ""Updates an existing D365FO X++ object using the MetaModel API. CRITICAL: This is the ONLY correct way to modify X++ objects. NEVER edit metadata XML files directly. Can update declaration, add/replace/remove methods, set properties, and add enum values/fields/indexes/relations. Use xpp_read_object first to see current state. ONLY works on custom model objects."",
+      ""description"": ""Updates an existing D365FO X++ object using the MetaModel API. CRITICAL: This is the ONLY correct way to modify X++ objects. NEVER edit metadata files directly. ALL parameters MUST be JSON — any XML or CDATA content will be REJECTED with an error. Can update declaration, add/replace/remove methods, set properties, and add enum values/fields/indexes/relations. Use xpp_read_object first to see current state. ONLY works on custom model objects."",
       ""inputSchema"": {
         ""type"": ""object"",
         ""properties"": {
           ""objectType"": { ""type"": ""string"", ""description"": ""The object type (AxClass, AxTable, AxForm, AxEdt, AxEnum)."" },
           ""objectName"": { ""type"": ""string"", ""description"": ""The object name to update."" },
-          ""declaration"": { ""type"": ""string"", ""description"": ""New raw X++ declaration code. Replaces existing. No CDATA wrappers."" },
-          ""methods"": { ""type"": ""array"", ""items"": { ""type"": ""string"" }, ""description"": ""Methods to add or replace (matched by name). Raw X++ code only, no CDATA."" },
+          ""declaration"": { ""type"": ""string"", ""description"": ""New raw X++ declaration code. Replaces existing. Plain code only — NO XML, NO CDATA."" },
+          ""methods"": { ""type"": ""array"", ""items"": { ""type"": ""string"" }, ""description"": ""Methods to add or replace (matched by name). Plain X++ code only — NO XML, NO CDATA. Any XML content will be rejected."" },
           ""removeMethodNames"": { ""type"": ""array"", ""items"": { ""type"": ""string"" }, ""description"": ""Method names to remove."" },
           ""properties"": { ""type"": ""object"", ""description"": ""Key-value pairs for scalar metadata properties to set or update. Same format as xpp_create_object."" },
           ""enumValues"": { ""type"": ""array"", ""items"": { ""type"": ""object"", ""properties"": { ""name"": { ""type"": ""string"" }, ""value"": { ""type"": ""integer"" }, ""label"": { ""type"": ""string"" } }, ""required"": [""name"", ""value""] }, ""description"": ""Enum values to add (for AxEnum). Values with matching names are skipped."" },
@@ -196,7 +196,7 @@ namespace XppAiCopilotCompanion.McpServer
     },
     {
       ""name"": ""xpp_get_environment"",
-      ""description"": ""Returns the D365FO development environment info: metadata folders, active project, active model name/ID/layer. Use this to understand the project context. CRITICAL RULE: In D365FO/X++ projects, NEVER use terminal commands to create, read, update, search, or list metadata XML files. Always use the xpp_* tools — they use the MetaModel API which correctly registers objects, maintains cross-references, and respects model boundaries."",
+      ""description"": ""Returns the D365FO development environment info: metadata folders, active project, active model name/ID/layer. Use this to understand the project context. CRITICAL RULE: In D365FO/X++ projects, NEVER use terminal commands to create, read, update, search, or list metadata files. Always use the xpp_* tools — they use the MetaModel API which correctly registers objects, maintains cross-references, and respects model boundaries."",
       ""inputSchema"": {
         ""type"": ""object"",
         ""properties"": {},

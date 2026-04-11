@@ -90,15 +90,6 @@ namespace XppAiCopilotCompanion
         /// </summary>
         public string[] Methods { get; set; }
 
-        /// <summary>
-        /// Raw XML fragment to inject inside the root element AFTER SourceCode.
-        /// Use this for metadata that the service does not generate automatically:
-        /// table fields, indexes, relations, field groups, form designs, data sources,
-        /// enum values, EDT properties, menu item properties, query structure, etc.
-        /// The fragment is inserted verbatim — it must be valid XML.
-        /// </summary>
-        public string MetadataXml { get; set; }
-
         public string BaseObjectName { get; set; }
     }
 

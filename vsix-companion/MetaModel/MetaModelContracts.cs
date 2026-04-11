@@ -65,7 +65,7 @@ namespace XppAiCopilotCompanion.MetaModel
         public string[] Methods { get; set; }
         public string ModelName { get; set; }
 
-        // Strongly-typed metadata (replaces MetadataXml)
+        // Strongly-typed metadata
         public Dictionary<string, string> Properties { get; set; }
         public List<EnumValueDto> EnumValues { get; set; }
         public List<FieldDto> Fields { get; set; }
@@ -83,7 +83,7 @@ namespace XppAiCopilotCompanion.MetaModel
         public string[] Methods { get; set; }
         public string[] RemoveMethodNames { get; set; }
 
-        // Strongly-typed metadata (replaces MetadataXml)
+        // Strongly-typed metadata
         public Dictionary<string, string> Properties { get; set; }
         public List<EnumValueDto> EnumValues { get; set; }
         public List<FieldDto> Fields { get; set; }
