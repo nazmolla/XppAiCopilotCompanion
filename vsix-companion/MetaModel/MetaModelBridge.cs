@@ -2,12 +2,15 @@ using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
+using System.Reflection;
 using System.Text;
+using System.Web.Script.Serialization;
 using System.Xml;
 using System.Xml.Serialization;
 using Microsoft.Dynamics.AX.Metadata.MetaModel;
 using Microsoft.Dynamics.AX.Metadata.Core.MetaModel;
 using Microsoft.Dynamics.AX.Metadata.Service;
+using Microsoft.Dynamics.AX.Framework.Xlnt.XReference;
 using Microsoft.Dynamics.Framework.Tools.Extensibility;
 using Microsoft.Dynamics.Framework.Tools.Labels;
 using Microsoft.Dynamics.Framework.Tools.MetaModel.Core;
@@ -253,6 +256,7 @@ namespace XppAiCopilotCompanion.MetaModel
                             foreach (var m in cls.Methods)
                                 result.Methods.Add(new MethodInfo { Name = m.Name, Source = m.Source });
                         result.Properties = ExtractProperties(cls);
+                        result.TypedMetadataJson = BuildTypedMetadataJson(objectType, cls);
                         result.ModelName = GetObjectModelName(objectType, objectName);
                         break;
 
@@ -268,6 +272,7 @@ namespace XppAiCopilotCompanion.MetaModel
                         result.Indexes = ExtractIndexes(tbl);
                         result.FieldGroups = ExtractFieldGroups(tbl);
                         result.Relations = ExtractRelations(tbl);
+                        result.TypedMetadataJson = BuildTypedMetadataJson(objectType, tbl);
                         result.ModelName = GetObjectModelName(objectType, objectName);
                         break;
 
@@ -279,6 +284,7 @@ namespace XppAiCopilotCompanion.MetaModel
                             foreach (var m in frm.Methods)
                                 result.Methods.Add(new MethodInfo { Name = m.Name, Source = m.Source });
                         result.Properties = ExtractProperties(frm);
+                        result.TypedMetadataJson = BuildTypedMetadataJson(objectType, frm);
                         result.ModelName = GetObjectModelName(objectType, objectName);
                         break;
 
@@ -287,6 +293,7 @@ namespace XppAiCopilotCompanion.MetaModel
                         if (enm == null) return new ReadObjectResult { Message = "Enum '" + objectName + "' not found." };
                         result.Properties = ExtractProperties(enm);
                         result.EnumValues = ExtractEnumValues(enm);
+                        result.TypedMetadataJson = BuildTypedMetadataJson(objectType, enm);
                         result.ModelName = GetObjectModelName(objectType, objectName);
                         break;
 
@@ -294,6 +301,7 @@ namespace XppAiCopilotCompanion.MetaModel
                         var edt = MetaService.GetExtendedDataType(objectName);
                         if (edt == null) return new ReadObjectResult { Message = "EDT '" + objectName + "' not found." };
                         result.Properties = ExtractProperties(edt);
+                        result.TypedMetadataJson = BuildTypedMetadataJson(objectType, edt);
                         result.ModelName = GetObjectModelName(objectType, objectName);
                         break;
 
@@ -305,6 +313,7 @@ namespace XppAiCopilotCompanion.MetaModel
                             foreach (var m in view.Methods)
                                 result.Methods.Add(new MethodInfo { Name = m.Name, Source = m.Source });
                         result.Properties = ExtractProperties(view);
+                        result.TypedMetadataJson = BuildTypedMetadataJson(objectType, view);
                         result.ModelName = GetObjectModelName(objectType, objectName);
                         break;
 
@@ -312,11 +321,20 @@ namespace XppAiCopilotCompanion.MetaModel
                         var qry = MetaService.GetQuery(objectName);
                         if (qry == null) return new ReadObjectResult { Message = "Query '" + objectName + "' not found." };
                         result.Properties = ExtractProperties(qry);
+                        result.DataSources = ExtractQueryDataSources(qry);
+                        result.TypedMetadataJson = BuildTypedMetadataJson(objectType, qry);
                         result.ModelName = GetObjectModelName(objectType, objectName);
                         break;
 
                     default:
-                        return new ReadObjectResult { Message = "Read not supported for type: " + objectType + ". Supported types: AxClass, AxTable, AxForm, AxEnum, AxEdt, AxView, AxQuery. Use xpp_find_object to search by name." };
+                        object genericObj;
+                        string readError;
+                        if (!TryGetObjectByTypeName(objectType, objectName, out genericObj, out readError) || genericObj == null)
+                            return new ReadObjectResult { Message = readError ?? ("Read not supported for type: " + objectType + ".") };
+
+                        PopulateReadResultFromGenericObject(result, objectType, genericObj);
+                        result.ModelName = GetObjectModelName(objectType, objectName);
+                        break;
                 }
 
                 result.IsCustom = IsCustomModel(result.ModelName);
@@ -358,6 +376,258 @@ namespace XppAiCopilotCompanion.MetaModel
             };
         }
 
+        private bool TryGetObjectByTypeName(string objectType, string objectName, out object obj, out string error)
+        {
+            obj = null;
+            error = null;
+            if (string.IsNullOrWhiteSpace(objectType) || string.IsNullOrWhiteSpace(objectName))
+            {
+                error = "objectType and objectName are required.";
+                return false;
+            }
+
+            string typeKey = objectType.StartsWith("Ax", StringComparison.OrdinalIgnoreCase)
+                ? objectType.Substring(2)
+                : objectType;
+
+            var methodCandidates = new List<string>
+            {
+                "Get" + typeKey,
+                "Get" + typeKey + "s"
+            };
+
+            if (string.Equals(objectType, "AxEdt", StringComparison.OrdinalIgnoreCase))
+                methodCandidates.Insert(0, "GetExtendedDataType");
+            if (string.Equals(objectType, "AxQuery", StringComparison.OrdinalIgnoreCase))
+                methodCandidates.Insert(0, "GetQuery");
+            if (string.Equals(objectType, "AxDataEntityView", StringComparison.OrdinalIgnoreCase))
+                methodCandidates.Insert(0, "GetDataEntityView");
+
+            foreach (string methodName in methodCandidates.Distinct(StringComparer.Ordinal))
+            {
+                try
+                {
+                    var method = MetaService.GetType().GetMethod(methodName, new[] { typeof(string) });
+                    if (method == null) continue;
+                    obj = method.Invoke(MetaService, new object[] { objectName });
+                    if (obj != null) return true;
+                }
+                catch
+                {
+                    // Try next candidate.
+                }
+            }
+
+            error = "Object '" + objectName + "' not found for type '" + objectType + "', or type is not readable via IMetaModelService.";
+            return false;
+        }
+
+        private static void PopulateReadResultFromGenericObject(ReadObjectResult result, string objectType, object axObj)
+        {
+            if (result == null || axObj == null) return;
+
+            result.Properties = ExtractProperties(axObj);
+            result.TypedMetadataJson = BuildTypedMetadataJson(objectType, axObj);
+
+            var declarationProp = axObj.GetType().GetProperty("Declaration");
+            result.Declaration = declarationProp?.GetValue(axObj) as string;
+
+            if (string.IsNullOrEmpty(result.Declaration))
+            {
+                var sourceCodeProp = axObj.GetType().GetProperty("SourceCode");
+                var sourceCode = sourceCodeProp?.GetValue(axObj);
+                if (sourceCode != null)
+                {
+                    var srcDeclProp = sourceCode.GetType().GetProperty("Declaration");
+                    result.Declaration = srcDeclProp?.GetValue(sourceCode) as string;
+                }
+            }
+
+            var methodsProp = axObj.GetType().GetProperty("Methods");
+            var methods = methodsProp?.GetValue(axObj) as System.Collections.IEnumerable;
+            if (methods != null)
+            {
+                foreach (var m in methods)
+                {
+                    if (m == null) continue;
+                    string name = m.GetType().GetProperty("Name")?.GetValue(m) as string;
+                    string source = m.GetType().GetProperty("Source")?.GetValue(m) as string;
+                    if (!string.IsNullOrEmpty(name) || !string.IsNullOrEmpty(source))
+                        result.Methods.Add(new MethodInfo { Name = name, Source = source });
+                }
+            }
+        }
+
+        private static string BuildTypedMetadataJson(string objectType, object axObj)
+        {
+            if (axObj == null) return null;
+            try
+            {
+                var serializer = new JavaScriptSerializer
+                {
+                    MaxJsonLength = int.MaxValue,
+                    RecursionLimit = 64
+                };
+
+                Type proxyType = ResolveProxyType(objectType);
+                if (proxyType != null)
+                {
+                    var visited = new HashSet<object>(ReferenceEqualityComparer.Instance);
+                    object proxy = MapSourceToTargetType(axObj, proxyType, 0, visited);
+                    return serializer.Serialize(proxy);
+                }
+
+                var visitedFallback = new HashSet<object>(ReferenceEqualityComparer.Instance);
+                object graph = ExtractMetadataGraph(axObj, 0, visitedFallback);
+                return serializer.Serialize(graph);
+            }
+            catch
+            {
+                return null;
+            }
+        }
+
+        private static object ExtractMetadataGraph(object value, int depth, HashSet<object> visited)
+        {
+            if (value == null) return null;
+            if (depth > 12) return null;
+
+            Type t = value.GetType();
+            Type nt = Nullable.GetUnderlyingType(t) ?? t;
+
+            if (nt.IsEnum) return value.ToString();
+            if (nt.IsPrimitive || nt == typeof(string) || nt == typeof(decimal)
+                || nt == typeof(DateTime) || nt == typeof(Guid))
+                return value;
+
+            if (!t.IsValueType)
+            {
+                if (!visited.Add(value)) return null;
+            }
+
+            if (value is System.Collections.IEnumerable enumerable && !(value is string))
+            {
+                var list = new List<object>();
+                foreach (object item in enumerable)
+                {
+                    object extracted = ExtractMetadataGraph(item, depth + 1, visited);
+                    if (extracted != null) list.Add(extracted);
+                }
+                return list;
+            }
+
+            var dict = new Dictionary<string, object>(StringComparer.OrdinalIgnoreCase);
+            foreach (var prop in t.GetProperties(BindingFlags.Public | BindingFlags.Instance))
+            {
+                if (!prop.CanRead || prop.GetIndexParameters().Length > 0) continue;
+                if (prop.Name == "Parent" || prop.Name == "Owner") continue;
+
+                object propValue;
+                try { propValue = prop.GetValue(value); }
+                catch { continue; }
+
+                object extracted = ExtractMetadataGraph(propValue, depth + 1, visited);
+                if (extracted != null) dict[prop.Name] = extracted;
+            }
+
+            return dict;
+        }
+
+        private static Type ResolveProxyType(string objectType)
+        {
+            if (string.IsNullOrWhiteSpace(objectType)) return null;
+            string fullName = "XppAiCopilotCompanion.MetaModel.Generated." + objectType + "Proxy";
+
+            foreach (var asm in AppDomain.CurrentDomain.GetAssemblies())
+            {
+                var t = asm.GetType(fullName, false, true);
+                if (t != null) return t;
+            }
+
+            return null;
+        }
+
+        private static object MapSourceToTargetType(object source, Type targetType, int depth, HashSet<object> visited)
+        {
+            if (targetType == null || depth > 12) return null;
+
+            Type targetUnderlying = Nullable.GetUnderlyingType(targetType) ?? targetType;
+            if (source == null)
+            {
+                if (targetUnderlying.IsValueType && Nullable.GetUnderlyingType(targetType) == null)
+                    return Activator.CreateInstance(targetUnderlying);
+                return null;
+            }
+
+            if (IsSimpleType(targetUnderlying))
+                return ConvertSimpleValue(source, targetUnderlying) ?? source?.ToString();
+
+            if (!source.GetType().IsValueType)
+            {
+                if (!visited.Add(source)) return null;
+            }
+
+            if (targetUnderlying != typeof(string)
+                && typeof(System.Collections.IEnumerable).IsAssignableFrom(targetUnderlying))
+            {
+                Type itemType = GetEnumerableItemType(targetUnderlying) ?? typeof(object);
+                var list = new List<object>();
+                if (source is System.Collections.IEnumerable srcEnumerable)
+                {
+                    foreach (object item in srcEnumerable)
+                    {
+                        object mapped = MapSourceToTargetType(item, itemType, depth + 1, visited);
+                        if (mapped != null) list.Add(mapped);
+                    }
+                }
+
+                object targetList = Activator.CreateInstance(typeof(List<>).MakeGenericType(itemType));
+                var add = targetList.GetType().GetMethod("Add");
+                foreach (object item in list) add?.Invoke(targetList, new[] { item });
+                return targetList;
+            }
+
+            object target = Activator.CreateInstance(targetUnderlying);
+            var srcType = source.GetType();
+            foreach (var tp in targetUnderlying.GetProperties(BindingFlags.Public | BindingFlags.Instance))
+            {
+                if (!tp.CanRead || tp.GetIndexParameters().Length > 0) continue;
+
+                var sp = srcType.GetProperty(tp.Name, BindingFlags.Public | BindingFlags.Instance | BindingFlags.IgnoreCase);
+                if (sp == null || !sp.CanRead || sp.GetIndexParameters().Length > 0) continue;
+
+                object srcValue;
+                try { srcValue = sp.GetValue(source); }
+                catch { continue; }
+
+                object mapped = MapSourceToTargetType(srcValue, tp.PropertyType, depth + 1, visited);
+                SetPropertyValue(tp, target, mapped);
+            }
+
+            return target;
+        }
+
+        private static void SetPropertyValue(PropertyInfo property, object target, object value)
+        {
+            try
+            {
+                var setter = property.GetSetMethod(true);
+                if (setter != null)
+                {
+                    setter.Invoke(target, new[] { value });
+                    return;
+                }
+            }
+            catch { }
+        }
+
+        private sealed class ReferenceEqualityComparer : IEqualityComparer<object>
+        {
+            public static readonly ReferenceEqualityComparer Instance = new ReferenceEqualityComparer();
+            public new bool Equals(object x, object y) => ReferenceEquals(x, y);
+            public int GetHashCode(object obj) => System.Runtime.CompilerServices.RuntimeHelpers.GetHashCode(obj);
+        }
+
         // ── Validation ──
 
         public ValidateObjectResult ValidateObject(ValidateObjectRequest req)
@@ -385,6 +655,27 @@ namespace XppAiCopilotCompanion.MetaModel
 
             // 3. Compare expected vs actual properties
             var mismatches = new List<string>();
+
+            if (!string.IsNullOrWhiteSpace(req.TypedMetadataJson))
+            {
+                if (string.IsNullOrWhiteSpace(readResult.TypedMetadataJson))
+                {
+                    mismatches.Add("typedMetadata: expected object graph but read result returned none");
+                }
+                else
+                {
+                    try
+                    {
+                        object expected = ParseTypedMetadataToNode(req.ObjectType, req.TypedMetadataJson);
+                        object actual = ParseTypedMetadataToNode(req.ObjectType, readResult.TypedMetadataJson);
+                        ValidateMetadataSubset(expected, actual, "typedMetadata", mismatches, 0);
+                    }
+                    catch (Exception ex)
+                    {
+                        mismatches.Add("typedMetadata: validation parse error: " + ex.Message);
+                    }
+                }
+            }
 
             if (req.Properties != null)
             {
@@ -473,9 +764,80 @@ namespace XppAiCopilotCompanion.MetaModel
             return result;
         }
 
+        private static void ValidateMetadataSubset(object expected, object actual, string path, List<string> mismatches, int depth)
+        {
+            if (depth > 10) return;
+            if (expected == null) return;
+            if (actual == null)
+            {
+                mismatches.Add(path + ": expected value present, actual is null");
+                return;
+            }
+
+            if (expected is Dictionary<string, object> expDict)
+            {
+                var actDict = actual as Dictionary<string, object>;
+                if (actDict == null)
+                {
+                    mismatches.Add(path + ": expected object, actual is " + actual.GetType().Name);
+                    return;
+                }
+
+                foreach (var kv in expDict)
+                {
+                    if (!actDict.TryGetValue(kv.Key, out object actVal))
+                    {
+                        mismatches.Add(path + "." + kv.Key + ": missing");
+                        continue;
+                    }
+                    ValidateMetadataSubset(kv.Value, actVal, path + "." + kv.Key, mismatches, depth + 1);
+                }
+                return;
+            }
+
+            var expArray = ToObjectArray(expected);
+            if (expArray != null)
+            {
+                var actArray = ToObjectArray(actual);
+                if (actArray == null)
+                {
+                    mismatches.Add(path + ": expected array, actual is " + actual.GetType().Name);
+                    return;
+                }
+
+                if (actArray.Length < expArray.Length)
+                    mismatches.Add(path + ": expected at least " + expArray.Length + " items, actual " + actArray.Length);
+
+                int compareCount = Math.Min(expArray.Length, actArray.Length);
+                for (int i = 0; i < compareCount; i++)
+                    ValidateMetadataSubset(expArray[i], actArray[i], path + "[" + i + "]", mismatches, depth + 1);
+
+                return;
+            }
+
+            string expText = Convert.ToString(expected);
+            string actText = Convert.ToString(actual);
+            if (!string.Equals(expText, actText, StringComparison.OrdinalIgnoreCase))
+                mismatches.Add(path + ": expected '" + expText + "', actual '" + actText + "'");
+        }
+
+        private static object[] ToObjectArray(object node)
+        {
+            if (node == null) return null;
+            if (node is object[] arr) return arr;
+            if (node is System.Collections.ArrayList al) return al.ToArray();
+            if (node is System.Collections.IEnumerable en && !(node is string))
+            {
+                var list = new List<object>();
+                foreach (object item in en) list.Add(item);
+                return list.ToArray();
+            }
+            return null;
+        }
+
         // ── Discovery ──
 
-        public FindObjectResult FindObject(string objectName, string objectType, bool exactMatch)
+        public FindObjectResult FindObject(string objectName, string objectType, bool exactMatch, int maxResults)
         {
             ThreadHelper.ThrowIfNotOnUIThread();
             if (MetaService == null)
@@ -507,10 +869,10 @@ namespace XppAiCopilotCompanion.MetaModel
                                     IsCustom = IsCustomModel(modelName)
                                 });
 
-                                if (result.Matches.Count >= 100) break;
+                                if (result.Matches.Count >= maxResults) break;
                             }
                         }
-                        if (result.Matches.Count >= 100) break;
+                        if (result.Matches.Count >= maxResults) break;
                     }
                     catch (Exception typeEx)
                     {
@@ -588,6 +950,272 @@ namespace XppAiCopilotCompanion.MetaModel
             }
 
             return result;
+        }
+
+        public ObjectTypeSchemaResult GetObjectTypeSchema(string objectType)
+        {
+            ThreadHelper.ThrowIfNotOnUIThread();
+
+            if (string.IsNullOrWhiteSpace(objectType))
+                return new ObjectTypeSchemaResult
+                {
+                    Success = false,
+                    ObjectType = objectType,
+                    Message = "objectType is required."
+                };
+
+            try
+            {
+                Type metadataType = ResolveMetadataType(objectType);
+                if (metadataType == null)
+                {
+                    return new ObjectTypeSchemaResult
+                    {
+                        Success = false,
+                        ObjectType = objectType,
+                        Message = "Unsupported or unknown object type: " + objectType
+                    };
+                }
+
+                var visited = new HashSet<Type>();
+                object schema = BuildTypeSchema(metadataType, 0, visited);
+
+                var serializer = new JavaScriptSerializer
+                {
+                    MaxJsonLength = int.MaxValue,
+                    RecursionLimit = 64
+                };
+
+                return new ObjectTypeSchemaResult
+                {
+                    Success = true,
+                    ObjectType = objectType,
+                    SchemaJson = serializer.Serialize(schema),
+                    Message = "Schema generated for " + objectType
+                };
+            }
+            catch (Exception ex)
+            {
+                return new ObjectTypeSchemaResult
+                {
+                    Success = false,
+                    ObjectType = objectType,
+                    Message = "Schema generation failed: " + ex.Message
+                };
+            }
+        }
+
+        public ProxyGenerationResult GenerateProxies(ProxyGenerationRequest request)
+        {
+            ThreadHelper.ThrowIfNotOnUIThread();
+
+            var normalized = request ?? new ProxyGenerationRequest();
+            var selectedTypes = new Dictionary<string, Type>(StringComparer.OrdinalIgnoreCase);
+
+            var requested = (normalized.ObjectTypes != null && normalized.ObjectTypes.Count > 0)
+                ? normalized.ObjectTypes
+                : GetDefaultProxyObjectTypes();
+
+            foreach (var objectType in requested)
+            {
+                if (string.IsNullOrWhiteSpace(objectType))
+                    continue;
+
+                var metadataType = ResolveMetadataType(objectType.Trim());
+                if (metadataType != null)
+                    selectedTypes[objectType.Trim()] = metadataType;
+            }
+
+            if (selectedTypes.Count == 0)
+            {
+                return new ProxyGenerationResult
+                {
+                    Success = false,
+                    Message = "No valid object types were provided for proxy generation."
+                };
+            }
+
+            var result = MetaModelProxyGenerator.Generate(selectedTypes, normalized);
+            if (!result.Success)
+                return result;
+
+            string outputPath = normalized.OutputFilePath;
+            if (string.IsNullOrWhiteSpace(outputPath))
+                outputPath = ResolveDefaultProxyOutputPath();
+
+            if (!string.IsNullOrWhiteSpace(outputPath))
+            {
+                try
+                {
+                    var directory = Path.GetDirectoryName(outputPath);
+                    if (!string.IsNullOrWhiteSpace(directory) && !Directory.Exists(directory))
+                        Directory.CreateDirectory(directory);
+
+                    File.WriteAllText(outputPath, result.GeneratedCode ?? string.Empty, Encoding.UTF8);
+                    result.OutputFilePath = outputPath;
+                    result.Message = result.Message + " Output written to '" + outputPath + "'.";
+                }
+                catch (Exception ex)
+                {
+                    result.Success = false;
+                    result.Message = "Proxy code generated but failed to write output file: " + ex.Message;
+                }
+            }
+            else
+            {
+                result.Message = result.Message + " Generated in memory only (no writable project path detected).";
+            }
+
+            return result;
+        }
+
+        private string ResolveDefaultProxyOutputPath()
+        {
+            ThreadHelper.ThrowIfNotOnUIThread();
+
+            try
+            {
+                var project = GetActiveProject();
+                string projectFile = project?.FullName;
+                if (string.IsNullOrWhiteSpace(projectFile))
+                    return null;
+
+                string projectDirectory = Path.GetDirectoryName(projectFile);
+                if (string.IsNullOrWhiteSpace(projectDirectory))
+                    return null;
+
+                return Path.Combine(projectDirectory, "MetaModel", "Generated", "MetadataProxies.g.cs");
+            }
+            catch
+            {
+                return null;
+            }
+        }
+
+        private static object BuildTypeSchema(Type type, int depth, HashSet<Type> visited)
+        {
+            if (type == null || depth > 8) return null;
+
+            Type underlying = Nullable.GetUnderlyingType(type) ?? type;
+            if (IsSimpleType(underlying))
+                return MapSimpleTypeToSchema(underlying);
+
+            // Prevent cyclic loops in type graph
+            if (!underlying.IsValueType && !visited.Add(underlying))
+                return new Dictionary<string, object>
+                {
+                    { "kind", "object" },
+                    { "type", underlying.Name },
+                    { "recursive", true }
+                };
+
+            if (underlying != typeof(string)
+                && typeof(System.Collections.IEnumerable).IsAssignableFrom(underlying))
+            {
+                Type itemType = GetEnumerableItemType(underlying) ?? typeof(object);
+                return new Dictionary<string, object>
+                {
+                    { "kind", "array" },
+                    { "item", BuildTypeSchema(itemType, depth + 1, visited) }
+                };
+            }
+
+            var properties = new Dictionary<string, object>(StringComparer.OrdinalIgnoreCase);
+            foreach (var prop in underlying.GetProperties(BindingFlags.Public | BindingFlags.Instance))
+            {
+                if (!prop.CanRead || prop.GetIndexParameters().Length > 0) continue;
+                var propSchema = BuildTypeSchema(prop.PropertyType, depth + 1, new HashSet<Type>(visited));
+                if (propSchema != null)
+                    properties[prop.Name] = propSchema;
+            }
+
+            return new Dictionary<string, object>
+            {
+                { "kind", "object" },
+                { "type", underlying.Name },
+                { "properties", properties }
+            };
+        }
+
+        private static Type GetEnumerableItemType(Type enumerableType)
+        {
+            if (enumerableType.IsArray)
+                return enumerableType.GetElementType();
+
+            if (enumerableType.IsGenericType)
+            {
+                var args = enumerableType.GetGenericArguments();
+                if (args.Length == 1) return args[0];
+            }
+
+            Type ienum = enumerableType.GetInterfaces()
+                .FirstOrDefault(i => i.IsGenericType
+                    && i.GetGenericTypeDefinition() == typeof(IEnumerable<>));
+            return ienum?.GetGenericArguments().FirstOrDefault();
+        }
+
+        private static List<string> GetDefaultProxyObjectTypes()
+        {
+            return new List<string>
+            {
+                "AxClass",
+                "AxTable",
+                "AxForm",
+                "AxEdt",
+                "AxEnum",
+                "AxView",
+                "AxQuery",
+                "AxMap",
+                "AxMenu",
+                "AxTile",
+                "AxMenuItemDisplay",
+                "AxMenuItemOutput",
+                "AxMenuItemAction",
+                "AxDataEntityView",
+                "AxSecurityPrivilege",
+                "AxSecurityDuty",
+                "AxSecurityRole",
+                "AxService",
+                "AxServiceGroup",
+                "AxConfigurationKey",
+                "AxTableExtension",
+                "AxFormExtension",
+                "AxEnumExtension",
+                "AxEdtExtension",
+                "AxViewExtension",
+                "AxMenuExtension",
+                "AxMenuItemDisplayExtension",
+                "AxMenuItemOutputExtension",
+                "AxMenuItemActionExtension",
+                "AxQuerySimpleExtension",
+                "AxSecurityDutyExtension",
+                "AxSecurityRoleExtension"
+            };
+        }
+
+        private static Dictionary<string, object> MapSimpleTypeToSchema(Type type)
+        {
+            if (type == typeof(string))
+                return new Dictionary<string, object> { { "kind", "scalar" }, { "type", "string" } };
+            if (type == typeof(bool))
+                return new Dictionary<string, object> { { "kind", "scalar" }, { "type", "boolean" } };
+            if (type == typeof(int) || type == typeof(long) || type == typeof(short))
+                return new Dictionary<string, object> { { "kind", "scalar" }, { "type", "integer" } };
+            if (type == typeof(float) || type == typeof(double) || type == typeof(decimal))
+                return new Dictionary<string, object> { { "kind", "scalar" }, { "type", "number" } };
+            if (type == typeof(DateTime))
+                return new Dictionary<string, object> { { "kind", "scalar" }, { "type", "datetime" } };
+            if (type == typeof(Guid))
+                return new Dictionary<string, object> { { "kind", "scalar" }, { "type", "guid" } };
+            if (type.IsEnum)
+                return new Dictionary<string, object>
+                {
+                    { "kind", "enum" },
+                    { "type", type.Name },
+                    { "values", Enum.GetNames(type) }
+                };
+
+            return new Dictionary<string, object> { { "kind", "scalar" }, { "type", type.Name } };
         }
 
         public ModelInfoResult GetModelInfo(string modelName)
@@ -844,11 +1472,11 @@ namespace XppAiCopilotCompanion.MetaModel
         {
             var axClass = new AxClass { Name = req.ObjectName };
             if (!string.IsNullOrEmpty(req.Declaration))
-                axClass.Declaration = StripCData(req.Declaration);
+                axClass.Declaration = PrepareSource(req.Declaration, req.FormatCode);
             else
                 axClass.Declaration = "class " + req.ObjectName + "\n{\n}";
 
-            AddMethods(axClass.Methods, req.Methods);
+            AddMethods(axClass.Methods, req.Methods, req.FormatCode);
             MetaService.CreateClass(axClass, saveInfo);
             AddToProjectIfActive(req.ObjectType ?? "AxClass", req.ObjectName);
             return Ok("Created AxClass '" + req.ObjectName + "'.");
@@ -858,9 +1486,9 @@ namespace XppAiCopilotCompanion.MetaModel
         {
             var axTable = new AxTable { Name = req.ObjectName };
             if (!string.IsNullOrEmpty(req.Declaration))
-                axTable.Declaration = StripCData(req.Declaration);
+                axTable.Declaration = PrepareSource(req.Declaration, req.FormatCode);
 
-            AddMethods(axTable.Methods, req.Methods);
+            AddMethods(axTable.Methods, req.Methods, req.FormatCode);
             try
             {
                 ApplyTypedMetadata(axTable, req);
@@ -878,9 +1506,9 @@ namespace XppAiCopilotCompanion.MetaModel
         {
             var axForm = new AxForm { Name = req.ObjectName };
             if (!string.IsNullOrEmpty(req.Declaration))
-                axForm.SourceCode.Declaration = StripCData(req.Declaration);
+                axForm.SourceCode.Declaration = PrepareSource(req.Declaration, req.FormatCode);
 
-            AddMethods(axForm.Methods, req.Methods);
+            AddMethods(axForm.Methods, req.Methods, req.FormatCode);
             try
             {
                 ApplyTypedMetadata(axForm, req);
@@ -966,8 +1594,8 @@ namespace XppAiCopilotCompanion.MetaModel
         {
             var axView = new AxView { Name = req.ObjectName };
             if (!string.IsNullOrEmpty(req.Declaration))
-                axView.Declaration = StripCData(req.Declaration);
-            AddMethods(axView.Methods, req.Methods);
+                axView.Declaration = PrepareSource(req.Declaration, req.FormatCode);
+            AddMethods(axView.Methods, req.Methods, req.FormatCode);
             ApplyTypedMetadata(axView, req);
             MetaService.CreateView(axView, saveInfo);
             AddToProjectIfActive("AxView", req.ObjectName);
@@ -978,7 +1606,7 @@ namespace XppAiCopilotCompanion.MetaModel
         {
             var entity = new AxDataEntityView { Name = req.ObjectName };
             if (!string.IsNullOrEmpty(req.Declaration))
-                entity.Declaration = StripCData(req.Declaration);
+                entity.Declaration = PrepareSource(req.Declaration, req.FormatCode);
             ApplyTypedMetadata(entity, req);
             MetaService.UpdateDataEntityView(entity, saveInfo);
             AddToProjectIfActive("AxDataEntityView", req.ObjectName);
@@ -1034,8 +1662,8 @@ namespace XppAiCopilotCompanion.MetaModel
         {
             var map = new AxMap { Name = req.ObjectName };
             if (!string.IsNullOrEmpty(req.Declaration))
-                map.Declaration = StripCData(req.Declaration);
-            AddMethods(map.Methods, req.Methods);
+                map.Declaration = PrepareSource(req.Declaration, req.FormatCode);
+            AddMethods(map.Methods, req.Methods, req.FormatCode);
             ApplyTypedMetadata(map, req);
             MetaService.CreateMap(map, saveInfo);
             AddToProjectIfActive("AxMap", req.ObjectName);
@@ -1162,9 +1790,9 @@ namespace XppAiCopilotCompanion.MetaModel
             if (saveInfo == null) return Fail("Cannot resolve model for '" + req.ObjectName + "'.");
 
             if (!string.IsNullOrEmpty(req.Declaration))
-                cls.Declaration = StripCData(req.Declaration);
+                cls.Declaration = PrepareSource(req.Declaration, req.FormatCode);
 
-            UpdateMethods(cls.Methods, req.Methods, req.RemoveMethodNames);
+            UpdateMethods(cls.Methods, req.Methods, req.RemoveMethodNames, req.FormatCode);
             MetaService.UpdateClass(cls, saveInfo);
             return Ok("Updated AxClass '" + req.ObjectName + "'.");
         }
@@ -1179,9 +1807,9 @@ namespace XppAiCopilotCompanion.MetaModel
             if (saveInfo == null) return Fail("Cannot resolve model for '" + req.ObjectName + "'.");
 
             if (!string.IsNullOrEmpty(req.Declaration))
-                tbl.Declaration = StripCData(req.Declaration);
+                tbl.Declaration = PrepareSource(req.Declaration, req.FormatCode);
 
-            UpdateMethods(tbl.Methods, req.Methods, req.RemoveMethodNames);
+            UpdateMethods(tbl.Methods, req.Methods, req.RemoveMethodNames, req.FormatCode);
             try
             {
                 ApplyTypedMetadata(tbl, req);
@@ -1204,9 +1832,9 @@ namespace XppAiCopilotCompanion.MetaModel
             if (saveInfo == null) return Fail("Cannot resolve model for '" + req.ObjectName + "'.");
 
             if (!string.IsNullOrEmpty(req.Declaration))
-                frm.SourceCode.Declaration = StripCData(req.Declaration);
+                frm.SourceCode.Declaration = PrepareSource(req.Declaration, req.FormatCode);
 
-            UpdateMethods(frm.Methods, req.Methods, req.RemoveMethodNames);
+            UpdateMethods(frm.Methods, req.Methods, req.RemoveMethodNames, req.FormatCode);
             MetaService.UpdateForm(frm, saveInfo);
             return Ok("Updated AxForm '" + req.ObjectName + "'.");
         }
@@ -1247,19 +1875,19 @@ namespace XppAiCopilotCompanion.MetaModel
 
         // ── Utility methods ──
 
-        private void AddMethods(IList<AxMethod> target, string[] sources)
+        private void AddMethods(IList<AxMethod> target, string[] sources, bool formatCode)
         {
             if (sources == null) return;
             foreach (string src in sources)
             {
                 if (string.IsNullOrWhiteSpace(src)) continue;
-                string clean = StripCData(src);
+                string clean = PrepareSource(src, formatCode);
                 string name = ExtractMethodName(clean);
                 target.Add(new AxMethod { Name = name, Source = clean });
             }
         }
 
-        private void UpdateMethods(IList<AxMethod> existing, string[] upserts, string[] removals)
+        private void UpdateMethods(IList<AxMethod> existing, string[] upserts, string[] removals, bool formatCode)
         {
             if (removals != null)
             {
@@ -1276,7 +1904,7 @@ namespace XppAiCopilotCompanion.MetaModel
                 foreach (string src in upserts)
                 {
                     if (string.IsNullOrWhiteSpace(src)) continue;
-                    string clean = StripCData(src);
+                    string clean = PrepareSource(src, formatCode);
                     string name = ExtractMethodName(clean);
                     var found = existing.FirstOrDefault(m =>
                         m.Name.Equals(name, StringComparison.OrdinalIgnoreCase));
@@ -1290,6 +1918,26 @@ namespace XppAiCopilotCompanion.MetaModel
                     }
                 }
             }
+        }
+
+        private static string PrepareSource(string source, bool formatCode)
+        {
+            string clean = StripCData(source);
+            return formatCode ? NormalizeXppWhitespace(clean) : clean;
+        }
+
+        private static string NormalizeXppWhitespace(string source)
+        {
+            if (string.IsNullOrWhiteSpace(source)) return source;
+
+            string normalized = source.Replace("\r\n", "\n").Replace("\r", "\n");
+            var lines = normalized.Split('\n');
+            for (int i = 0; i < lines.Length; i++)
+            {
+                string line = lines[i].Replace("\t", "    ");
+                lines[i] = line.TrimEnd();
+            }
+            return string.Join("\n", lines).TrimEnd();
         }
 
         private static string ExtractMethodName(string source)
@@ -1657,6 +2305,12 @@ namespace XppAiCopilotCompanion.MetaModel
 
         private void ApplyTypedMetadata(object target, CreateObjectRequest req)
         {
+            if (!string.IsNullOrWhiteSpace(req.TypedMetadataJson))
+            {
+                ApplyTypedMetadataGraph(target, req.ObjectType, req.TypedMetadataJson);
+                return;
+            }
+
             ApplyProperties(target, req.Properties);
             if (target is AxEnum axEnum)
                 ApplyEnumValues(axEnum, req.EnumValues);
@@ -1667,11 +2321,19 @@ namespace XppAiCopilotCompanion.MetaModel
                 ApplyFieldGroups(axTable, req.FieldGroups);
                 ApplyRelations(axTable, req.Relations);
             }
+            if (target is AxQuerySimple axQuery)
+                ApplyQueryDataSources(axQuery, req.DataSources);
             ApplyEntryPoints(target, req.EntryPoints);
         }
 
         private void ApplyTypedMetadata(object target, UpdateObjectRequest req)
         {
+            if (!string.IsNullOrWhiteSpace(req.TypedMetadataJson))
+            {
+                ApplyTypedMetadataGraph(target, req.ObjectType, req.TypedMetadataJson);
+                return;
+            }
+
             ApplyProperties(target, req.Properties);
             if (target is AxEnum axEnum)
                 ApplyEnumValues(axEnum, req.EnumValues);
@@ -1682,7 +2344,606 @@ namespace XppAiCopilotCompanion.MetaModel
                 ApplyFieldGroups(axTable, req.FieldGroups);
                 ApplyRelations(axTable, req.Relations);
             }
+            if (target is AxQuerySimple axQuery)
+                ApplyQueryDataSources(axQuery, req.DataSources);
             ApplyEntryPoints(target, req.EntryPoints);
+        }
+
+        private static void ApplyTypedMetadataGraph(object target, string objectType, string typedMetadataJson)
+        {
+            if (target == null || string.IsNullOrWhiteSpace(typedMetadataJson)) return;
+
+            try
+            {
+                object parsed = ParseTypedMetadataToNode(objectType, typedMetadataJson);
+                var dict = parsed as Dictionary<string, object>;
+                if (dict == null) return;
+
+                // AxQuery needs concrete root/embedded datasource creation semantics.
+                if (target is AxQuerySimple query)
+                    ApplyQueryDataSourcesFromTypedMetadata(query, dict);
+
+                ApplyObjectNode(target, dict);
+            }
+            catch
+            {
+                // Keep tool resilient; caller still gets base create/update result.
+            }
+        }
+
+        private static object ParseTypedMetadataToNode(string objectType, string typedMetadataJson)
+        {
+            var serializer = new JavaScriptSerializer
+            {
+                MaxJsonLength = int.MaxValue,
+                RecursionLimit = 64
+            };
+
+            Type proxyType = ResolveProxyType(objectType);
+            if (proxyType != null)
+            {
+                object proxyObj = serializer.Deserialize(typedMetadataJson, proxyType);
+                return ExtractMetadataGraph(proxyObj, 0, new HashSet<object>(ReferenceEqualityComparer.Instance));
+            }
+
+            return serializer.DeserializeObject(typedMetadataJson);
+        }
+
+        private static void ApplyObjectNode(object target, Dictionary<string, object> node)
+        {
+            if (target == null || node == null) return;
+
+            foreach (var kv in node)
+            {
+                var prop = FindProperty(target.GetType(), kv.Key);
+                if (prop == null || !prop.CanRead) continue;
+
+                Type propType = Nullable.GetUnderlyingType(prop.PropertyType) ?? prop.PropertyType;
+
+                // Handle collections (including read-only collection properties).
+                if (typeof(System.Collections.IEnumerable).IsAssignableFrom(propType) && propType != typeof(string))
+                {
+                    object collection;
+                    try { collection = prop.GetValue(target); }
+                    catch { continue; }
+
+                    if (collection == null)
+                    {
+                        if (!prop.CanWrite) continue;
+                        object created = CreateDefaultInstance(propType);
+                        if (created == null) continue;
+                        prop.SetValue(target, created);
+                        collection = created;
+                    }
+
+                    ClearCollectionIfPossible(collection);
+                    PopulateCollectionFromNode(collection, kv.Value);
+                    continue;
+                }
+
+                if (!prop.CanWrite) continue;
+
+                if (kv.Value == null)
+                {
+                    if (Nullable.GetUnderlyingType(prop.PropertyType) != null || !prop.PropertyType.IsValueType)
+                        prop.SetValue(target, null);
+                    continue;
+                }
+
+                if (IsSimpleType(propType))
+                {
+                    object converted = ConvertSimpleValue(kv.Value, propType);
+                    if (converted != null)
+                        prop.SetValue(target, converted);
+                    continue;
+                }
+
+                var childNode = kv.Value as Dictionary<string, object>;
+                if (childNode == null) continue;
+
+                object child = null;
+                try { child = prop.GetValue(target); } catch { }
+
+                // Support nested metadata on read-only properties when they expose an existing object.
+                if (child == null)
+                {
+                    if (!prop.CanWrite) continue;
+                    child = CreateDefaultInstance(propType);
+                    if (child == null) continue;
+                }
+
+                ApplyObjectNode(child, childNode);
+                if (prop.CanWrite)
+                    prop.SetValue(target, child);
+            }
+        }
+
+        private static void PopulateCollectionFromNode(object collection, object node)
+        {
+            if (collection == null || node == null) return;
+            var values = ToObjectArray(node);
+            if (values == null) return;
+
+            var addMethod = collection.GetType().GetMethod("Add");
+            if (addMethod == null || addMethod.GetParameters().Length != 1) return;
+            Type itemType = addMethod.GetParameters()[0].ParameterType;
+
+            foreach (object entry in values)
+            {
+                if (entry == null) continue;
+                object addValue = null;
+
+                if (IsSimpleType(itemType))
+                {
+                    addValue = ConvertSimpleValue(entry, itemType);
+                }
+                else
+                {
+                    var childDict = entry as Dictionary<string, object>;
+                    if (childDict == null && entry is System.Collections.Hashtable ht)
+                    {
+                        childDict = new Dictionary<string, object>(StringComparer.OrdinalIgnoreCase);
+                        foreach (System.Collections.DictionaryEntry de in ht)
+                            childDict[Convert.ToString(de.Key)] = de.Value;
+                    }
+                    if (childDict != null)
+                    {
+                        object item = CreateDefaultInstance(itemType);
+                        if (item != null)
+                        {
+                            ApplyObjectNode(item, childDict);
+                            addValue = item;
+                        }
+                    }
+                }
+
+                if (addValue != null)
+                    addMethod.Invoke(collection, new[] { addValue });
+            }
+        }
+
+        private static void ApplyQueryDataSourcesFromTypedMetadata(AxQuerySimple query, Dictionary<string, object> node)
+        {
+            if (query == null || node == null) return;
+
+            object dsNode = GetNodeValue(node, "DataSources", "dataSources");
+            var dsValues = ToObjectArray(dsNode);
+            if (dsValues == null) return;
+
+            var dsProp = query.GetType().GetProperty("DataSources", BindingFlags.Public | BindingFlags.Instance | BindingFlags.IgnoreCase);
+            var rootCollection = dsProp?.GetValue(query);
+            if (rootCollection == null) return;
+
+            ClearCollectionIfPossible(rootCollection);
+
+            foreach (var entry in dsValues)
+            {
+                var dsDict = ToDictionary(entry);
+                if (dsDict == null) continue;
+                AddQueryDataSourceNode(rootCollection, dsDict);
+            }
+        }
+
+        private static void AddQueryDataSourceNode(object collection, Dictionary<string, object> node)
+        {
+            if (collection == null || node == null) return;
+
+            var addMethod = collection.GetType().GetMethod("Add");
+            if (addMethod == null || addMethod.GetParameters().Length != 1) return;
+
+            Type itemType = addMethod.GetParameters()[0].ParameterType;
+            object dataSource = CreateDefaultInstance(itemType);
+            if (dataSource == null) return;
+
+            ApplyDictionaryToObject(dataSource, node,
+                "DataSources", "dataSources", "ChildDataSources", "childDataSources", "Ranges", "ranges");
+            ApplyQueryRangesFromNode(dataSource, node);
+            ApplyChildDataSourcesFromNode(dataSource, node);
+
+            addMethod.Invoke(collection, new[] { dataSource });
+        }
+
+        private static void ApplyChildDataSourcesFromNode(object dataSource, Dictionary<string, object> node)
+        {
+            object childrenNode = GetNodeValue(node,
+                "DataSources", "dataSources", "ChildDataSources", "childDataSources");
+            var children = ToObjectArray(childrenNode);
+            if (children == null || children.Length == 0) return;
+
+            var childrenProp = FindProperty(dataSource.GetType(), "DataSources")
+                ?? FindProperty(dataSource.GetType(), "ChildDataSources");
+            var childCollection = childrenProp?.GetValue(dataSource);
+            if (childCollection == null) return;
+
+            ClearCollectionIfPossible(childCollection);
+            foreach (var child in children)
+            {
+                var childDict = ToDictionary(child);
+                if (childDict == null) continue;
+                AddQueryDataSourceNode(childCollection, childDict);
+            }
+        }
+
+        private static void ApplyQueryRangesFromNode(object dataSource, Dictionary<string, object> node)
+        {
+            object rangesNode = GetNodeValue(node, "Ranges", "ranges");
+            var ranges = ToObjectArray(rangesNode);
+            if (ranges == null || ranges.Length == 0) return;
+
+            var rangesProp = FindProperty(dataSource.GetType(), "Ranges");
+            var rangeCollection = rangesProp?.GetValue(dataSource);
+            if (rangeCollection == null) return;
+
+            var addMethod = rangeCollection.GetType().GetMethod("Add");
+            if (addMethod == null || addMethod.GetParameters().Length != 1) return;
+            Type rangeType = addMethod.GetParameters()[0].ParameterType;
+
+            ClearCollectionIfPossible(rangeCollection);
+            foreach (var rangeNode in ranges)
+            {
+                var rangeDict = ToDictionary(rangeNode);
+                if (rangeDict == null) continue;
+
+                object range = CreateDefaultInstance(rangeType);
+                if (range == null) continue;
+
+                ApplyDictionaryToObject(range, rangeDict);
+                addMethod.Invoke(rangeCollection, new[] { range });
+            }
+        }
+
+        private static void ApplyDictionaryToObject(object target, Dictionary<string, object> source, params string[] excludedKeys)
+        {
+            if (target == null || source == null) return;
+
+            var excluded = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            if (excludedKeys != null)
+            {
+                foreach (var k in excludedKeys)
+                    if (!string.IsNullOrWhiteSpace(k)) excluded.Add(k);
+            }
+
+            foreach (var kv in source)
+            {
+                if (excluded.Contains(kv.Key)) continue;
+
+                var prop = FindProperty(target.GetType(), kv.Key);
+                if (prop == null || !prop.CanWrite) continue;
+
+                object converted = ConvertValueForProperty(kv.Value, prop.PropertyType);
+                if (converted != null)
+                    prop.SetValue(target, converted);
+            }
+        }
+
+        private static object ConvertValueForProperty(object input, Type propertyType)
+        {
+            if (input == null) return null;
+
+            Type targetType = Nullable.GetUnderlyingType(propertyType) ?? propertyType;
+            object simple = ConvertSimpleValue(input, targetType);
+            if (simple != null) return simple;
+
+            if (targetType == typeof(string))
+                return Convert.ToString(input);
+
+            if (input is string text)
+            {
+                try
+                {
+                    var parse = targetType.GetMethod("Parse", BindingFlags.Public | BindingFlags.Static,
+                        null, new[] { typeof(string) }, null);
+                    if (parse != null)
+                        return parse.Invoke(null, new object[] { text });
+                }
+                catch { }
+
+                try
+                {
+                    var ctor = targetType.GetConstructor(new[] { typeof(string) });
+                    if (ctor != null)
+                        return ctor.Invoke(new object[] { text });
+                }
+                catch { }
+
+                try
+                {
+                    object obj = CreateDefaultInstance(targetType);
+                    var nameProp = FindProperty(targetType, "Name");
+                    if (obj != null && nameProp != null && nameProp.CanWrite)
+                    {
+                        nameProp.SetValue(obj, text);
+                        return obj;
+                    }
+                }
+                catch { }
+            }
+
+            return null;
+        }
+
+        private static object GetNodeValue(Dictionary<string, object> dict, params string[] keys)
+        {
+            if (dict == null || keys == null) return null;
+
+            foreach (var key in keys)
+            {
+                if (string.IsNullOrWhiteSpace(key)) continue;
+                if (dict.TryGetValue(key, out object value)) return value;
+            }
+
+            return null;
+        }
+
+        private static Dictionary<string, object> ToDictionary(object value)
+        {
+            if (value is Dictionary<string, object> d) return d;
+            if (value is System.Collections.Hashtable ht)
+            {
+                var dict = new Dictionary<string, object>(StringComparer.OrdinalIgnoreCase);
+                foreach (System.Collections.DictionaryEntry de in ht)
+                    dict[Convert.ToString(de.Key)] = de.Value;
+                return dict;
+            }
+            return null;
+        }
+
+        private static void ClearCollectionIfPossible(object collection)
+        {
+            var clearMethod = collection?.GetType().GetMethod("Clear");
+            if (clearMethod == null) return;
+            try { clearMethod.Invoke(collection, null); } catch { }
+        }
+
+        private static object CreateDefaultInstance(Type type)
+        {
+            try
+            {
+                if (type.IsInterface || type.IsAbstract) return null;
+                return Activator.CreateInstance(type);
+            }
+            catch
+            {
+                return null;
+            }
+        }
+
+        private static PropertyInfo FindProperty(Type type, string name)
+        {
+            return type.GetProperty(name, BindingFlags.Public | BindingFlags.Instance | BindingFlags.IgnoreCase);
+        }
+
+        private static bool IsSimpleType(Type t)
+        {
+            Type nt = Nullable.GetUnderlyingType(t) ?? t;
+            return nt.IsPrimitive || nt.IsEnum || nt == typeof(string) || nt == typeof(decimal)
+                || nt == typeof(DateTime) || nt == typeof(Guid);
+        }
+
+        private static object ConvertSimpleValue(object input, Type targetType)
+        {
+            try
+            {
+                if (input == null) return null;
+                Type nt = Nullable.GetUnderlyingType(targetType) ?? targetType;
+
+                if (nt == typeof(string)) return Convert.ToString(input);
+                if (nt.IsEnum)
+                {
+                    if (input is string es)
+                        return Enum.Parse(nt, es, true);
+                    return Enum.ToObject(nt, Convert.ToInt32(input));
+                }
+                if (nt == typeof(bool))
+                {
+                    if (input is string bs)
+                    {
+                        if ("1".Equals(bs) || "yes".Equals(bs, StringComparison.OrdinalIgnoreCase)) return true;
+                        if ("0".Equals(bs) || "no".Equals(bs, StringComparison.OrdinalIgnoreCase)) return false;
+                    }
+                    return Convert.ToBoolean(input);
+                }
+                if (nt == typeof(Guid))
+                    return Guid.Parse(Convert.ToString(input));
+                if (nt == typeof(DateTime))
+                    return DateTime.Parse(Convert.ToString(input));
+
+                return Convert.ChangeType(input, nt, System.Globalization.CultureInfo.InvariantCulture);
+            }
+            catch
+            {
+                return null;
+            }
+        }
+
+        private static void ApplyQueryDataSources(AxQuerySimple query, List<QueryDataSourceDto> dataSources)
+        {
+            if (query == null || dataSources == null || dataSources.Count == 0)
+                return;
+
+            var dsProp = query.GetType().GetProperty("DataSources");
+            var dsCollection = dsProp?.GetValue(query);
+            if (dsCollection == null) return;
+
+            ClearCollectionIfPossible(dsCollection);
+
+            // Preferred shape: nested DTO tree using ChildDataSources.
+            bool hasNested = dataSources.Any(ds => ds?.ChildDataSources != null && ds.ChildDataSources.Count > 0);
+            if (hasNested)
+            {
+                foreach (var dto in dataSources)
+                    AddQueryDataSourceFromDto(dsCollection, dto);
+                return;
+            }
+
+            // Backward-compat shape: flattened list using ParentDataSource references.
+            var byParent = new Dictionary<string, List<QueryDataSourceDto>>(StringComparer.OrdinalIgnoreCase);
+            foreach (var dto in dataSources.Where(d => d != null))
+            {
+                string parent = string.IsNullOrWhiteSpace(dto.ParentDataSource) ? string.Empty : dto.ParentDataSource;
+                if (!byParent.TryGetValue(parent, out var list))
+                {
+                    list = new List<QueryDataSourceDto>();
+                    byParent[parent] = list;
+                }
+                list.Add(dto);
+            }
+
+            if (byParent.TryGetValue(string.Empty, out var roots))
+            {
+                foreach (var root in roots)
+                    AddQueryDataSourceFromFlat(dsCollection, root, byParent);
+            }
+            else
+            {
+                // If parent links are absent, treat all as roots.
+                foreach (var dto in dataSources)
+                    AddQueryDataSourceFromDto(dsCollection, dto);
+            }
+        }
+
+        private static void AddQueryDataSourceFromFlat(object collection, QueryDataSourceDto dto,
+            Dictionary<string, List<QueryDataSourceDto>> byParent)
+        {
+            object created = AddQueryDataSourceFromDto(collection, dto);
+            if (created == null || string.IsNullOrWhiteSpace(dto?.Name)) return;
+
+            if (!byParent.TryGetValue(dto.Name, out var children) || children == null || children.Count == 0)
+                return;
+
+            var childCollection = FindProperty(created.GetType(), "DataSources")?.GetValue(created)
+                ?? FindProperty(created.GetType(), "ChildDataSources")?.GetValue(created);
+            if (childCollection == null) return;
+
+            foreach (var child in children)
+                AddQueryDataSourceFromFlat(childCollection, child, byParent);
+        }
+
+        private static object AddQueryDataSourceFromDto(object collection, QueryDataSourceDto dto)
+        {
+            if (collection == null || dto == null) return null;
+            if (string.IsNullOrWhiteSpace(dto.Name) && string.IsNullOrWhiteSpace(dto.Table)) return null;
+
+            var addMethod = collection.GetType().GetMethod("Add");
+            if (addMethod == null || addMethod.GetParameters().Length != 1) return null;
+            Type dsType = addMethod.GetParameters()[0].ParameterType;
+
+            object ds = CreateDefaultInstance(dsType);
+            if (ds == null) return null;
+
+            TrySetPropertyValue(ds, dto.Name, "Name", "DataSourceName");
+            TrySetPropertyValue(ds, dto.Table, "Table", "TableName");
+            TrySetPropertyValue(ds, dto.ParentDataSource, "ParentDataSource", "JoinDataSource", "Parent");
+            TrySetPropertyValue(ds, dto.JoinMode, "JoinMode");
+            TrySetPropertyValue(ds, dto.LinkType, "LinkType");
+            if (dto.DynamicFields.HasValue)
+                TrySetPropertyValue(ds, dto.DynamicFields.Value ? "true" : "false", "DynamicFields");
+            if (dto.Relations.HasValue)
+                TrySetPropertyValue(ds, dto.Relations.Value ? "true" : "false", "Relations");
+            if (dto.FirstOnly.HasValue)
+                TrySetPropertyValue(ds, dto.FirstOnly.Value ? "true" : "false", "FirstOnly");
+
+            ApplyQueryRanges(ds, dto.Ranges);
+
+            addMethod.Invoke(collection, new object[] { ds });
+
+            if (dto.ChildDataSources != null && dto.ChildDataSources.Count > 0)
+            {
+                var childCollection = FindProperty(ds.GetType(), "DataSources")?.GetValue(ds)
+                    ?? FindProperty(ds.GetType(), "ChildDataSources")?.GetValue(ds);
+                if (childCollection != null)
+                {
+                    ClearCollectionIfPossible(childCollection);
+                    foreach (var child in dto.ChildDataSources)
+                        AddQueryDataSourceFromDto(childCollection, child);
+                }
+            }
+
+            return ds;
+        }
+
+        private static object FindQueryDataSourceByName(object dsCollection, string name)
+        {
+            if (dsCollection == null || string.IsNullOrWhiteSpace(name)) return null;
+            var enumerable = dsCollection as System.Collections.IEnumerable;
+            if (enumerable == null) return null;
+
+            foreach (object item in enumerable)
+            {
+                var nameProp = item?.GetType().GetProperty("Name")
+                    ?? item?.GetType().GetProperty("DataSourceName");
+                string existingName = nameProp?.GetValue(item) as string;
+                if (!string.IsNullOrWhiteSpace(existingName)
+                    && existingName.Equals(name, StringComparison.OrdinalIgnoreCase))
+                    return item;
+            }
+
+            return null;
+        }
+
+        private static void ApplyQueryRanges(object dataSource, List<QueryRangeDto> ranges)
+        {
+            if (dataSource == null || ranges == null || ranges.Count == 0) return;
+
+            var rangesProp = dataSource.GetType().GetProperty("Ranges");
+            var rangesCollection = rangesProp?.GetValue(dataSource);
+            if (rangesCollection == null) return;
+
+            var addMethod = rangesCollection.GetType().GetMethod("Add");
+            if (addMethod == null || addMethod.GetParameters().Length != 1) return;
+            Type rangeType = addMethod.GetParameters()[0].ParameterType;
+
+            foreach (var dto in ranges)
+            {
+                if (string.IsNullOrWhiteSpace(dto?.Field) && string.IsNullOrWhiteSpace(dto?.Name))
+                    continue;
+
+                object range = Activator.CreateInstance(rangeType);
+                TrySetPropertyValue(range, dto.Name, "Name");
+                TrySetPropertyValue(range, dto.Field, "Field", "DataField", "Column");
+                TrySetPropertyValue(range, dto.Value, "Value", "Range", "Expression");
+                addMethod.Invoke(rangesCollection, new object[] { range });
+            }
+        }
+
+        private static void TrySetPropertyValue(object target, string value, params string[] propertyNames)
+        {
+            if (target == null || string.IsNullOrWhiteSpace(value) || propertyNames == null) return;
+
+            foreach (string propertyName in propertyNames)
+            {
+                if (string.IsNullOrWhiteSpace(propertyName)) continue;
+                var prop = target.GetType().GetProperty(propertyName);
+                if (prop == null || !prop.CanWrite) continue;
+
+                try
+                {
+                    Type propType = Nullable.GetUnderlyingType(prop.PropertyType) ?? prop.PropertyType;
+                    object converted;
+
+                    if (propType == typeof(string))
+                        converted = value;
+                    else if (propType == typeof(bool))
+                        converted = value.Equals("true", StringComparison.OrdinalIgnoreCase)
+                            || value.Equals("1", StringComparison.OrdinalIgnoreCase)
+                            || value.Equals("yes", StringComparison.OrdinalIgnoreCase);
+                    else if (propType == typeof(int))
+                        converted = int.Parse(value);
+                    else if (propType == typeof(long))
+                        converted = long.Parse(value);
+                    else if (propType.IsEnum)
+                        converted = Enum.Parse(propType, value, true);
+                    else
+                        continue;
+
+                    prop.SetValue(target, converted);
+                    return;
+                }
+                catch
+                {
+                    // Try next matching property name.
+                }
+            }
         }
 
         // ── Strongly-typed metadata extraction (for read) ──
@@ -1801,6 +3062,102 @@ namespace XppAiCopilotCompanion.MetaModel
                 result.Add(dto);
             }
             return result;
+        }
+
+        private static List<QueryDataSourceDto> ExtractQueryDataSources(object query)
+        {
+            var result = new List<QueryDataSourceDto>();
+            if (query == null) return result;
+
+            var dsProp = query.GetType().GetProperty("DataSources");
+            var dsCollection = dsProp?.GetValue(query) as System.Collections.IEnumerable;
+            if (dsCollection == null) return result;
+
+            foreach (object ds in dsCollection)
+            {
+                if (ds == null) continue;
+
+                var dto = new QueryDataSourceDto
+                {
+                    Name = ReadStringProperty(ds, "Name", "DataSourceName"),
+                    Table = ReadStringProperty(ds, "Table", "TableName"),
+                    ParentDataSource = ReadStringProperty(ds, "ParentDataSource", "JoinDataSource", "Parent"),
+                    JoinMode = ReadStringProperty(ds, "JoinMode"),
+                    LinkType = ReadStringProperty(ds, "LinkType")
+                };
+
+                dto.DynamicFields = ReadBoolProperty(ds, "DynamicFields");
+                dto.Relations = ReadBoolProperty(ds, "Relations");
+                dto.FirstOnly = ReadBoolProperty(ds, "FirstOnly");
+
+                var rangesProp = ds.GetType().GetProperty("Ranges");
+                var ranges = rangesProp?.GetValue(ds) as System.Collections.IEnumerable;
+                if (ranges != null)
+                {
+                    foreach (object r in ranges)
+                    {
+                        if (r == null) continue;
+                        dto.Ranges.Add(new QueryRangeDto
+                        {
+                            Name = ReadStringProperty(r, "Name"),
+                            Field = ReadStringProperty(r, "Field", "DataField", "Column"),
+                            Value = ReadStringProperty(r, "Value", "Range", "Expression")
+                        });
+                    }
+                }
+
+                result.Add(dto);
+            }
+
+            return result;
+        }
+
+        private static string ReadStringProperty(object target, params string[] names)
+        {
+            if (target == null || names == null) return null;
+            foreach (string name in names)
+            {
+                var prop = target.GetType().GetProperty(name);
+                if (prop == null || !prop.CanRead) continue;
+                try
+                {
+                    var val = prop.GetValue(target);
+                    if (val != null) return val.ToString();
+                }
+                catch { }
+            }
+            return null;
+        }
+
+        private static bool? ReadBoolProperty(object target, params string[] names)
+        {
+            if (target == null || names == null) return null;
+            foreach (string name in names)
+            {
+                var prop = target.GetType().GetProperty(name);
+                if (prop == null || !prop.CanRead) continue;
+                try
+                {
+                    object val = prop.GetValue(target);
+                    if (val == null) continue;
+
+                    Type valType = Nullable.GetUnderlyingType(prop.PropertyType) ?? prop.PropertyType;
+                    if (valType == typeof(bool))
+                        return (bool)val;
+
+                    string s = val.ToString();
+                    if ("true".Equals(s, StringComparison.OrdinalIgnoreCase)
+                        || "yes".Equals(s, StringComparison.OrdinalIgnoreCase)
+                        || "1".Equals(s, StringComparison.OrdinalIgnoreCase))
+                        return true;
+                    if ("false".Equals(s, StringComparison.OrdinalIgnoreCase)
+                        || "no".Equals(s, StringComparison.OrdinalIgnoreCase)
+                        || "0".Equals(s, StringComparison.OrdinalIgnoreCase))
+                        return false;
+                }
+                catch { }
+            }
+            return null;
         }
 
         private static string TryGetLabelText(object controller, string labelId)
@@ -1981,6 +3338,139 @@ namespace XppAiCopilotCompanion.MetaModel
             }
 
             public IEnumerable<string> GetNames() => _getNamesFunc();
+        }
+
+        // ── Cross-Reference search ──
+
+        public FindReferencesResult FindReferences(string objectType, string objectName, string referenceKind, int maxResults)
+        {
+            ThreadHelper.ThrowIfNotOnUIThread();
+            var result = new FindReferencesResult { Success = true };
+
+            try
+            {
+                var xrefProvider = CoreUtility.ServiceProvider
+                    .GetService(typeof(ICrossReferenceProvider)) as ICrossReferenceProvider;
+
+                if (xrefProvider == null)
+                {
+                    result.Message = "Cross-reference service not available. " +
+                        "The XRef database may not have been built yet — run a full build in VS to populate it.";
+                    return result;
+                }
+
+                string targetPath = BuildXRefPath(objectType, objectName);
+                if (targetPath == null)
+                {
+                    result.Message = "Unsupported object type for cross-reference search: '" + objectType + "'. " +
+                        "Supported: AxClass, AxTable, AxForm, AxEnum, AxView, AxQuery, AxEdt, AxDataEntityView, AxMap.";
+                    return result;
+                }
+
+                result.TargetPath = targetPath;
+
+                CrossReferenceKind kind = ParseCrossReferenceKind(referenceKind);
+                var refs = xrefProvider.FindReferences(null, targetPath, kind);
+
+                foreach (var r in refs)
+                {
+                    if (result.References.Count >= maxResults) break;
+                    result.References.Add(CrossReferenceToItem(r));
+                }
+
+                if (result.References.Count == 0)
+                    result.Message = "No references found to '" + objectName + "' (" + objectType + ").";
+            }
+            catch (Exception ex)
+            {
+                result.Success = false;
+                result.Message = "Cross-reference search error: " + ex.Message;
+            }
+
+            return result;
+        }
+
+        private static string BuildXRefPath(string objectType, string objectName)
+        {
+            string folder = ObjectTypeToXRefFolder(objectType);
+            return folder == null ? null : "/" + folder + "/" + objectName;
+        }
+
+        private static string ObjectTypeToXRefFolder(string objectType)
+        {
+            switch (objectType)
+            {
+                case "AxClass": return "Classes";
+                case "AxTable": return "Tables";
+                case "AxForm": return "Forms";
+                case "AxEnum": return "BaseEnums";
+                case "AxView": return "Views";
+                case "AxQuery": return "Queries";
+                case "AxEdt": return "ExtendedDataTypes";
+                case "AxMenuItemDisplay": return "MenuItemDisplays";
+                case "AxMenuItemOutput": return "MenuItemOutputs";
+                case "AxMenuItemAction": return "MenuItemActions";
+                case "AxDataEntityView": return "DataEntityViews";
+                case "AxMap": return "Maps";
+                case "AxService": return "Services";
+                case "AxServiceGroup": return "ServiceGroups";
+                case "AxSecurityRole": return "SecurityRoles";
+                case "AxSecurityPrivilege": return "SecurityPrivileges";
+                case "AxSecurityDuty": return "SecurityDuties";
+                default: return null;
+            }
+        }
+
+        private static string XRefFolderToObjectType(string folder)
+        {
+            switch (folder)
+            {
+                case "Classes": return "AxClass";
+                case "Tables": return "Tables";
+                case "Forms": return "AxForm";
+                case "BaseEnums": return "AxEnum";
+                case "Views": return "AxView";
+                case "Queries": return "AxQuery";
+                case "ExtendedDataTypes": return "AxEdt";
+                case "MenuItemDisplays": return "AxMenuItemDisplay";
+                case "MenuItemOutputs": return "AxMenuItemOutput";
+                case "MenuItemActions": return "AxMenuItemAction";
+                case "DataEntityViews": return "AxDataEntityView";
+                case "Maps": return "AxMap";
+                default: return folder;
+            }
+        }
+
+        private static CrossReferenceKind ParseCrossReferenceKind(string kind)
+        {
+            if (string.IsNullOrEmpty(kind) || kind.Equals("Any", StringComparison.OrdinalIgnoreCase))
+                return CrossReferenceKind.Any;
+            CrossReferenceKind parsed;
+            if (Enum.TryParse(kind, ignoreCase: true, result: out parsed))
+                return parsed;
+            return CrossReferenceKind.Any;
+        }
+
+        private static CrossReferenceItem CrossReferenceToItem(CrossReference r)
+        {
+            // Parse path like "/Classes/HcmWorker/Methods/someMethod" → [Classes, HcmWorker, Methods, someMethod]
+            string sourcePath = r.SourcePath ?? "";
+            var parts = sourcePath.TrimStart('/').Split('/');
+            string objType = parts.Length > 0 ? XRefFolderToObjectType(parts[0]) : null;
+            string objName = parts.Length > 1 ? parts[1] : null;
+            // parts[2] is usually "Methods" (member kind), parts[3] is member name
+            string member = parts.Length >= 4 ? parts[3] : null;
+
+            return new CrossReferenceItem
+            {
+                SourcePath = r.SourcePath,
+                SourceObjectType = objType,
+                SourceObjectName = objName,
+                SourceMember = member,
+                Kind = r.Kind.ToString(),
+                LineNumber = r.LineNumber,
+                SourceModule = r.SourceModule
+            };
         }
     }
 }

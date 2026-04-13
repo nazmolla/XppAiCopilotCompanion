@@ -24,6 +24,10 @@ ownership rules, auto-add objects to the VS project, and handle all operations.
   xpp_find_object              — Search for objects by name across ALL models and packages.
                                   Supports partial name matching and type filtering.
   xpp_list_objects             — List objects filtered by model, type, and/or name pattern.
+  xpp_find_references          — Query the cross-reference database to find all objects that
+                                  USE or REFERENCE a given object (SQL-indexed, sub-second).
+                                  Ideal for: finding who uses a table, who extends a class,
+                                  who calls a method. Much faster than full scans.
 
   ── Model & Project ──
   xpp_get_model_info           — Get model details: name, publisher, version, layer, dependencies.
@@ -48,6 +52,15 @@ MANDATORY TOOL-FIRST RULES:
   2. To create ANY X++ object → call xpp_create_object. Do NOT write XML or create files.
   3. To modify ANY X++ object → call xpp_update_object.
   4. To find objects by name → call xpp_find_object. To enumerate → call xpp_list_objects.
+     - After finding an object, note its modelName and use xpp_list_objects(modelName=...) to
+       search for related objects in that same model — this is 5–20x faster than a global scan.
+     - To find all objects that USE a known object → call xpp_find_references immediately.
+       The XRef database is SQL-indexed and returns results in milliseconds regardless of size.
+  5. EFFICIENT TWO-STEP SEARCH PATTERN (USE THIS):
+     Step 1: xpp_find_object/xpp_list_objects → get objectName + modelName
+     Step 2a: xpp_find_references(objectType, objectName) → who uses it (fast, indexed)
+     Step 2b: xpp_list_objects(modelName=..., nameFilter=...) → related objects in same model
+     NEVER do a global scan when you already know the model or can use XRef.
   5. To understand the environment → call xpp_get_environment, xpp_list_models.
   6. NEVER instruct the user to manually create, edit, or find files. YOU do it via tools.
   7. NEVER write raw XML. The tools use the MetaModel API to generate correct metadata.

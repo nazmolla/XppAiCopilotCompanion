@@ -1,7 +1,7 @@
 ﻿<?xml version="1.0" encoding="utf-8"?>
 <PackageManifest Version="2.0.0" xmlns="http://schemas.microsoft.com/developer/vsx-schema/2011" xmlns:d="http://schemas.microsoft.com/developer/vsx-schema-design/2011">
   <Metadata>
-    <Identity Id="XppAiCopilotCompanion" Version="0.3.115" Language="en-US" Publisher="Mohamed Nazmi" />
+    <Identity Id="XppAiCopilotCompanion" Version="0.3.234" Language="en-US" Publisher="Mohamed Nazmi" />
     <DisplayName>X++ AI Copilot Companion</DisplayName>
     <Description xml:space="preserve">Visual Studio UI-first companion extension that builds selective X++ AI context in-process and supports open-document edits and project file operations via Visual Studio APIs.</Description>
     <MoreInfo>https://github.com/nazmolla/XppAiCopilotCompanion</MoreInfo>

@@ -12,6 +12,7 @@ namespace XppAiCopilotCompanion.McpServer
         private readonly BridgeClient _bridge;
         private readonly DocSearchHandler _docSearch;
 
+
         public ToolRouter(BridgeClient bridge)
         {
             _bridge = bridge ?? throw new ArgumentNullException(nameof(bridge));
@@ -34,6 +35,7 @@ namespace XppAiCopilotCompanion.McpServer
             ""enum"": [""AxClass"", ""AxTable"", ""AxView"", ""AxDataEntityView"", ""AxMap"", ""AxEdt"", ""AxEnum"", ""AxForm"", ""AxTile"", ""AxMenu"", ""AxMenuItemDisplay"", ""AxMenuItemOutput"", ""AxMenuItemAction"", ""AxQuery"", ""AxSecurityPrivilege"", ""AxSecurityDuty"", ""AxSecurityRole"", ""AxService"", ""AxServiceGroup"", ""AxConfigurationKey"", ""AxTableExtension"", ""AxFormExtension"", ""AxEnumExtension"", ""AxEdtExtension"", ""AxViewExtension"", ""AxMenuExtension"", ""AxMenuItemDisplayExtension"", ""AxMenuItemOutputExtension"", ""AxMenuItemActionExtension"", ""AxQuerySimpleExtension"", ""AxSecurityDutyExtension"", ""AxSecurityRoleExtension""]
           },
           ""objectName"": { ""type"": ""string"", ""description"": ""Name of the object. Must follow the model's naming prefix convention."" },
+          ""typedMetadata"": { ""type"": ""object"", ""description"": ""Full strongly-typed metadata graph for the target object type. Preferred for complete metadata writes across all object types."" },
           ""declaration"": { ""type"": ""string"", ""description"": ""Raw X++ class/table declaration code block. Plain code only — NO XML, NO CDATA wrappers."" },
           ""methods"": { ""type"": ""array"", ""items"": { ""type"": ""string"" }, ""description"": ""Array of complete X++ method source strings. Plain code only — NO XML, NO CDATA wrappers. Any XML content will be rejected with an error."" },
           ""properties"": { ""type"": ""object"", ""description"": ""Key-value pairs for scalar metadata properties set via reflection. Keys are property names (e.g. Label, IsExtensible, TableGroup, ObjectType, Object, FormRef). Values are strings — type coercion is automatic (bool, int, enum). Use xpp_read_object on an existing object to discover available property names."" },
@@ -42,6 +44,7 @@ namespace XppAiCopilotCompanion.McpServer
           ""indexes"": { ""type"": ""array"", ""items"": { ""type"": ""object"", ""properties"": { ""name"": { ""type"": ""string"" }, ""allowDuplicates"": { ""type"": ""boolean"" }, ""fields"": { ""type"": ""array"", ""items"": { ""type"": ""string"" } } }, ""required"": [""name"", ""fields""] }, ""description"": ""Table indexes for AxTable. Each index has a name and array of field names."" },
           ""fieldGroups"": { ""type"": ""array"", ""items"": { ""type"": ""object"", ""properties"": { ""name"": { ""type"": ""string"" }, ""label"": { ""type"": ""string"" }, ""fields"": { ""type"": ""array"", ""items"": { ""type"": ""string"" } } }, ""required"": [""name"", ""fields""] }, ""description"": ""Table field groups for AxTable. Each group has a name and array of field names."" },
           ""relations"": { ""type"": ""array"", ""items"": { ""type"": ""object"", ""properties"": { ""name"": { ""type"": ""string"" }, ""relatedTable"": { ""type"": ""string"" }, ""constraints"": { ""type"": ""array"", ""items"": { ""type"": ""object"", ""properties"": { ""field"": { ""type"": ""string"" }, ""relatedField"": { ""type"": ""string"" } } } } }, ""required"": [""name"", ""relatedTable""] }, ""description"": ""Table relations for AxTable. Each relation maps fields to related table fields."" },
+          ""dataSources"": { ""type"": ""array"", ""items"": { ""type"": ""object"", ""properties"": { ""name"": { ""type"": ""string"" }, ""table"": { ""type"": ""string"" }, ""parentDataSource"": { ""type"": ""string"" }, ""joinMode"": { ""type"": ""string"" }, ""linkType"": { ""type"": ""string"" }, ""dynamicFields"": { ""type"": ""boolean"" }, ""relations"": { ""type"": ""boolean"" }, ""firstOnly"": { ""type"": ""boolean"" }, ""ranges"": { ""type"": ""array"", ""items"": { ""type"": ""object"", ""properties"": { ""name"": { ""type"": ""string"" }, ""field"": { ""type"": ""string"" }, ""value"": { ""type"": ""string"" } } } } }, ""required"": [""name""] }, ""description"": ""Query data sources for AxQuery. Use this to define table sources and optional ranges."" },
           ""entryPoints"": { ""type"": ""array"", ""items"": { ""type"": ""object"", ""properties"": { ""name"": { ""type"": ""string"" }, ""objectType"": { ""type"": ""string"" }, ""objectName"": { ""type"": ""string"" }, ""grant"": { ""type"": ""string"" } }, ""required"": [""name""] }, ""description"": ""Security entry points for AxSecurityPrivilege/Duty/Role."" },
           ""modelName"": { ""type"": ""string"", ""description"": ""Target model name. If omitted, uses the active project's model."" }
         },
@@ -50,7 +53,7 @@ namespace XppAiCopilotCompanion.McpServer
     },
     {
       ""name"": ""xpp_read_object"",
-      ""description"": ""Reads a D365FO X++ object by type and name using the MetaModel API. CRITICAL: This is the ONLY correct way to read X++ objects. NEVER read metadata files directly via Get-Content or terminal commands. Returns declaration, methods, and strongly-typed metadata (properties, enumValues, fields, indexes, fieldGroups, relations) in JSON format — use this output directly as a template for creating or modifying objects. Also returns model name and editability. For objects not supported by the typed API, pass filePath instead."",
+      ""description"": ""Reads a D365FO X++ object by type and name using the MetaModel API. CRITICAL: This is the ONLY correct way to read X++ objects. NEVER read metadata files directly via Get-Content or terminal commands. Returns declaration, methods, and strongly-typed metadata, including a full typedMetadata object graph for round-trip safe writes across all types (plus compatibility fields like properties, enumValues, fields, indexes, fieldGroups, relations, dataSources). Also returns model name and editability. For objects not supported by the typed API, pass filePath instead."",
       ""inputSchema"": {
         ""type"": ""object"",
         ""properties"": {
@@ -69,6 +72,7 @@ namespace XppAiCopilotCompanion.McpServer
         ""properties"": {
           ""objectType"": { ""type"": ""string"", ""description"": ""The object type (AxClass, AxTable, AxForm, AxEdt, AxEnum)."" },
           ""objectName"": { ""type"": ""string"", ""description"": ""The object name to update."" },
+          ""typedMetadata"": { ""type"": ""object"", ""description"": ""Full strongly-typed metadata graph for complete metadata updates across all object types."" },
           ""declaration"": { ""type"": ""string"", ""description"": ""New raw X++ declaration code. Replaces existing. Plain code only — NO XML, NO CDATA."" },
           ""methods"": { ""type"": ""array"", ""items"": { ""type"": ""string"" }, ""description"": ""Methods to add or replace (matched by name). Plain X++ code only — NO XML, NO CDATA. Any XML content will be rejected."" },
           ""removeMethodNames"": { ""type"": ""array"", ""items"": { ""type"": ""string"" }, ""description"": ""Method names to remove."" },
@@ -78,6 +82,7 @@ namespace XppAiCopilotCompanion.McpServer
           ""indexes"": { ""type"": ""array"", ""items"": { ""type"": ""object"", ""properties"": { ""name"": { ""type"": ""string"" }, ""allowDuplicates"": { ""type"": ""boolean"" }, ""fields"": { ""type"": ""array"", ""items"": { ""type"": ""string"" } } }, ""required"": [""name"", ""fields""] }, ""description"": ""Indexes to add (for AxTable)."" },
           ""fieldGroups"": { ""type"": ""array"", ""items"": { ""type"": ""object"", ""properties"": { ""name"": { ""type"": ""string"" }, ""label"": { ""type"": ""string"" }, ""fields"": { ""type"": ""array"", ""items"": { ""type"": ""string"" } } }, ""required"": [""name"", ""fields""] }, ""description"": ""Field groups to add (for AxTable)."" },
           ""relations"": { ""type"": ""array"", ""items"": { ""type"": ""object"", ""properties"": { ""name"": { ""type"": ""string"" }, ""relatedTable"": { ""type"": ""string"" }, ""constraints"": { ""type"": ""array"", ""items"": { ""type"": ""object"", ""properties"": { ""field"": { ""type"": ""string"" }, ""relatedField"": { ""type"": ""string"" } } } } }, ""required"": [""name"", ""relatedTable""] }, ""description"": ""Relations to add (for AxTable)."" },
+          ""dataSources"": { ""type"": ""array"", ""items"": { ""type"": ""object"", ""properties"": { ""name"": { ""type"": ""string"" }, ""table"": { ""type"": ""string"" }, ""parentDataSource"": { ""type"": ""string"" }, ""joinMode"": { ""type"": ""string"" }, ""linkType"": { ""type"": ""string"" }, ""dynamicFields"": { ""type"": ""boolean"" }, ""relations"": { ""type"": ""boolean"" }, ""firstOnly"": { ""type"": ""boolean"" }, ""ranges"": { ""type"": ""array"", ""items"": { ""type"": ""object"", ""properties"": { ""name"": { ""type"": ""string"" }, ""field"": { ""type"": ""string"" }, ""value"": { ""type"": ""string"" } } } } }, ""required"": [""name""] }, ""description"": ""Query data sources for AxQuery updates."" },
           ""entryPoints"": { ""type"": ""array"", ""items"": { ""type"": ""object"", ""properties"": { ""name"": { ""type"": ""string"" }, ""objectType"": { ""type"": ""string"" }, ""objectName"": { ""type"": ""string"" }, ""grant"": { ""type"": ""string"" } }, ""required"": [""name""] }, ""description"": ""Entry points to add (for security types)."" }
         },
         ""required"": [""objectType"", ""objectName""]
@@ -98,13 +103,14 @@ namespace XppAiCopilotCompanion.McpServer
     },
     {
       ""name"": ""xpp_find_object"",
-      ""description"": ""Searches for D365FO metadata objects by name across ALL loaded models and packages using the MetaModel API. CRITICAL: Always use this instead of Get-ChildItem/dir/file searches on metadata folders. NEVER search the file system for X++ objects. Returns matching objects with type, model, and editability."",
+      ""description"": ""Searches for D365FO metadata objects by name across ALL loaded models and packages using the MetaModel API. CRITICAL: Always use this instead of Get-ChildItem/dir/file searches on metadata folders. NEVER search the file system for X++ objects. Returns matching objects with type, model, and editability. PERFORMANCE TIP: Always provide objectType when known -- searching 1 type is 5-10x faster than searching all 10 types."",
       ""inputSchema"": {
         ""type"": ""object"",
         ""properties"": {
           ""objectName"": { ""type"": ""string"", ""description"": ""Full or partial name to search for (case-insensitive)."" },
-          ""objectType"": { ""type"": ""string"", ""description"": ""Limit search to a specific type (AxClass, AxTable, etc.)."" },
-          ""exactMatch"": { ""type"": ""boolean"", ""description"": ""If true, only exact name matches. Default false."" }
+          ""objectType"": { ""type"": ""string"", ""description"": ""Strongly recommended: limits search to 1 type (5-10x faster). Values: AxClass, AxTable, AxForm, AxEnum, AxView, AxQuery, AxEdt, AxMenuItemDisplay, AxMenuItemOutput, AxMenuItemAction."" },
+          ""exactMatch"": { ""type"": ""boolean"", ""description"": ""If true, only exact name matches. Default false."" },
+          ""maxResults"": { ""type"": ""integer"", ""description"": ""Max results to return. Default 25. Max 100. Lower values return faster."" }
         },
         ""required"": [""objectName""]
       }
@@ -117,10 +123,24 @@ namespace XppAiCopilotCompanion.McpServer
         ""properties"": {
           ""nameFilter"": { ""type"": ""string"", ""description"": ""Required. Substring to match object names (case-insensitive). Example: 'CustTable', 'SalesOrder'."" },
           ""objectType"": { ""type"": ""string"", ""description"": ""Strongly recommended. Filter by type: AxClass, AxTable, AxForm, AxEnum, AxView, AxQuery, AxEdt, AxMenuItemDisplay, AxMenuItemOutput, AxMenuItemAction."" },
-          ""modelName"": { ""type"": ""string"", ""description"": ""Filter by model name."" },
-          ""maxResults"": { ""type"": ""integer"", ""description"": ""Max results. Default 100."" }
+          ""modelName"": { ""type"": ""string"", ""description"": ""Filter by model name. EFFICIENCY TIP: after finding an object use its modelName here to find related objects in the same model — much faster than searching all models."" },
+          ""maxResults"": { ""type"": ""integer"", ""description"": ""Max results. Default 25. Max 100. Lower values return faster."" }
         },
         ""required"": [""nameFilter""]
+      }
+    },
+    {
+      ""name"": ""xpp_find_references"",
+      ""description"": ""Queries the local D365FO cross-reference database to find all objects that USE or REFERENCE a given object (incoming references). Uses an indexed SQL query — returns results in milliseconds regardless of codebase size. Ideal for: finding all classes/forms that use a table, finding who extends a class, finding all method call sites. After xpp_find_object returns a result, immediately call this to discover the usage graph without expensive full scans."",
+      ""inputSchema"": {
+        ""type"": ""object"",
+        ""properties"": {
+          ""objectType"": { ""type"": ""string"", ""description"": ""Required. Type of the TARGET object (the one being searched for). AxClass, AxTable, AxForm, AxEnum, AxView, AxQuery, AxEdt, AxDataEntityView, AxMap, AxService."" },
+          ""objectName"": { ""type"": ""string"", ""description"": ""Required. Exact name of the target object to find references to."" },
+          ""referenceKind"": { ""type"": ""string"", ""description"": ""Optional. Filter by reference kind. Any (default), TypeReference (code that uses the type), MethodCall (calls a method on this object), ClassExtended (extends this class), InterfaceImplementation (implements this interface), Attribute, MethodOverride."" },
+          ""maxResults"": { ""type"": ""integer"", ""description"": ""Max results. Default 50. Max 200."" }
+        },
+        ""required"": [""objectType"", ""objectName""]
       }
     },
     {
@@ -215,7 +235,7 @@ namespace XppAiCopilotCompanion.McpServer
         },
         ""required"": [""query""]
       }
-    }
+    },
     {
       ""name"": ""xpp_validate_object"",
       ""description"": ""Validates that a D365FO object exists, is added to the active VS project, and has the expected metadata properties/fields/relations. Use after xpp_create_object or xpp_update_object to confirm all metadata was applied correctly. Returns valid=true only when ALL checks pass: object exists, in project, and all specified properties/fields match. Returns a mismatches list describing any discrepancies."",
@@ -224,6 +244,7 @@ namespace XppAiCopilotCompanion.McpServer
         ""properties"": {
           ""objectType"": { ""type"": ""string"", ""description"": ""The object type (AxClass, AxTable, AxEnum, AxEdt, AxView, AxQuery)."" },
           ""objectName"": { ""type"": ""string"", ""description"": ""The object name to validate."" },
+          ""typedMetadata"": { ""type"": ""object"", ""description"": ""Optional full typed metadata graph to validate as a subset against the current object."" },
           ""properties"": { ""type"": ""object"", ""description"": ""Expected key-value property pairs to verify (e.g. {Label: '@MyLabel', IsExtensible: 'true'}). Each entry is checked against the actual object."" },
           ""fields"": { ""type"": ""array"", ""items"": { ""type"": ""object"", ""properties"": { ""name"": { ""type"": ""string"" } }, ""required"": [""name""] }, ""description"": ""Expected table fields — only names are checked for existence."" },
           ""enumValues"": { ""type"": ""array"", ""items"": { ""type"": ""object"", ""properties"": { ""name"": { ""type"": ""string"" } }, ""required"": [""name""] }, ""description"": ""Expected enum value names to verify exist on the enum."" },
@@ -231,6 +252,17 @@ namespace XppAiCopilotCompanion.McpServer
           ""relations"": { ""type"": ""array"", ""items"": { ""type"": ""object"", ""properties"": { ""name"": { ""type"": ""string"" } }, ""required"": [""name""] }, ""description"": ""Expected relation names to verify exist on the table."" }
         },
         ""required"": [""objectType"", ""objectName""]
+      }
+    },
+    {
+      ""name"": ""xpp_get_object_type_schema"",
+      ""description"": ""Returns a generated JSON schema for a D365FO metadata object type based on reflective type inspection. Use this to discover full strongly-typed typedMetadata shape for create/update/validate payloads."",
+      ""inputSchema"": {
+        ""type"": ""object"",
+        ""properties"": {
+          ""objectType"": { ""type"": ""string"", ""description"": ""The object type to inspect (for example AxClass, AxTable, AxForm, AxEnum, AxQuery, AxView)."" }
+        },
+        ""required"": [""objectType""]
       }
     }
   ]
@@ -251,16 +283,18 @@ namespace XppAiCopilotCompanion.McpServer
                 case "xpp_update_object":
                 case "xpp_update_current_object": return DelegateToBridge(idToken, json, "update_object");
                 case "xpp_delete_object": return DelegateToBridge(idToken, json, "delete_object");
-                case "xpp_find_object": return DelegateToBridge(idToken, json, "find_object");
-                case "xpp_list_objects": return DelegateToBridge(idToken, json, "list_objects");
-                case "xpp_get_model_info": return DelegateToBridge(idToken, json, "get_model_info");
+                case "xpp_find_object": return HandleFindObject(idToken, json);
+                case "xpp_list_objects": return HandleListObjects(idToken, json);
+                case "xpp_find_references": return HandleFindReferences(idToken, json);
+                case "xpp_get_model_info": return HandleGetModelInfo(idToken, json);
                 case "xpp_list_models": return DelegateToBridge(idToken, json, "list_models");
-                case "xpp_read_label": return DelegateToBridge(idToken, json, "read_label");
-                case "xpp_create_label": return DelegateToBridge(idToken, json, "create_label");
-                case "xpp_add_to_project": return DelegateToBridge(idToken, json, "add_to_project");
+                case "xpp_read_label": return HandleReadLabel(idToken, json);
+                case "xpp_create_label": return HandleCreateLabel(idToken, json);
+                case "xpp_add_to_project": return HandleAddToProject(idToken, json);
                 case "xpp_list_project_items": return DelegateToBridge(idToken, json, "list_project_items");
                 case "xpp_get_environment": return DelegateToBridge(idToken, json, "get_environment");
-                case "xpp_validate_object": return DelegateToBridge(idToken, json, "validate_object");
+                case "xpp_validate_object": return HandleValidateObject(idToken, json);
+                case "xpp_get_object_type_schema": return HandleGetObjectTypeSchema(idToken, json);
 
                 // ── Local-only tools ──
                 case "xpp_search_docs": return _docSearch.Handle(idToken, json);
@@ -379,6 +413,122 @@ namespace XppAiCopilotCompanion.McpServer
 
             return JsonHelpers.BuildToolResult(idToken,
                 "Either (objectType + objectName) or filePath is required.", isError: true);
+        }
+
+        private string HandleFindObject(string idToken, string json)
+        {
+            string argsJson = JsonHelpers.ExtractToolArgumentsObject(json);
+            string objectName = JsonHelpers.ExtractArgString(argsJson, "objectName", "name");
+
+            if (string.IsNullOrEmpty(objectName))
+                return JsonHelpers.BuildToolResult(idToken,
+                    "Parameter 'objectName' is required.", isError: true);
+
+            return DelegateToBridge(idToken, json, "find_object");
+        }
+
+        private string HandleListObjects(string idToken, string json)
+        {
+            string argsJson = JsonHelpers.ExtractToolArgumentsObject(json);
+            string nameFilter = JsonHelpers.ExtractArgString(argsJson, "nameFilter");
+
+            if (string.IsNullOrEmpty(nameFilter))
+                return JsonHelpers.BuildToolResult(idToken,
+                    "Parameter 'nameFilter' is required. Provide a substring to match object names (e.g., 'CustTable', 'SalesOrder').", isError: true);
+
+            return DelegateToBridge(idToken, json, "list_objects");
+        }
+
+        private string HandleFindReferences(string idToken, string json)
+        {
+            string argsJson = JsonHelpers.ExtractToolArgumentsObject(json);
+            string objectType = JsonHelpers.ExtractArgString(argsJson, "objectType");
+            string objectName = JsonHelpers.ExtractArgString(argsJson, "objectName");
+
+            if (string.IsNullOrEmpty(objectType))
+                return JsonHelpers.BuildToolResult(idToken,
+                    "Parameter 'objectType' is required (e.g. AxTable, AxClass).", isError: true);
+            if (string.IsNullOrEmpty(objectName))
+                return JsonHelpers.BuildToolResult(idToken,
+                    "Parameter 'objectName' is required.", isError: true);
+
+            return DelegateToBridge(idToken, json, "find_references");
+        }
+
+        private string HandleGetModelInfo(string idToken, string json)
+        {
+            string argsJson = JsonHelpers.ExtractToolArgumentsObject(json);
+            string modelName = JsonHelpers.ExtractArgString(argsJson, "modelName");
+
+            if (string.IsNullOrEmpty(modelName))
+                return JsonHelpers.BuildToolResult(idToken,
+                    "Parameter 'modelName' is required.", isError: true);
+
+            return DelegateToBridge(idToken, json, "get_model_info");
+        }
+
+        private string HandleReadLabel(string idToken, string json)
+        {
+            string argsJson = JsonHelpers.ExtractToolArgumentsObject(json);
+            string labelFileId = JsonHelpers.ExtractArgString(argsJson, "labelFileId");
+
+            if (string.IsNullOrEmpty(labelFileId))
+                return JsonHelpers.BuildToolResult(idToken,
+                    "Parameter 'labelFileId' is required.", isError: true);
+
+            return DelegateToBridge(idToken, json, "read_label");
+        }
+
+        private string HandleCreateLabel(string idToken, string json)
+        {
+            string argsJson = JsonHelpers.ExtractToolArgumentsObject(json);
+            string labelFileId = JsonHelpers.ExtractArgString(argsJson, "labelFileId");
+            string labelId = JsonHelpers.ExtractArgString(argsJson, "labelId");
+            string text = JsonHelpers.ExtractArgString(argsJson, "text");
+
+            if (string.IsNullOrEmpty(labelFileId) || string.IsNullOrEmpty(labelId) || string.IsNullOrEmpty(text))
+                return JsonHelpers.BuildToolResult(idToken,
+                    "Parameters 'labelFileId', 'labelId', and 'text' are required.", isError: true);
+
+            return DelegateToBridge(idToken, json, "create_label");
+        }
+
+        private string HandleAddToProject(string idToken, string json)
+        {
+            string argsJson = JsonHelpers.ExtractToolArgumentsObject(json);
+            string objectType = JsonHelpers.ExtractArgString(argsJson, "objectType", "type");
+            string objectName = JsonHelpers.ExtractArgString(argsJson, "objectName", "name");
+
+            if (string.IsNullOrEmpty(objectType) || string.IsNullOrEmpty(objectName))
+                return JsonHelpers.BuildToolResult(idToken,
+                    "Parameters 'objectType' and 'objectName' are required.", isError: true);
+
+            return DelegateToBridge(idToken, json, "add_to_project");
+        }
+
+        private string HandleValidateObject(string idToken, string json)
+        {
+            string argsJson = JsonHelpers.ExtractToolArgumentsObject(json);
+            string objectType = JsonHelpers.ExtractArgString(argsJson, "objectType", "type");
+            string objectName = JsonHelpers.ExtractArgString(argsJson, "objectName", "name");
+
+            if (string.IsNullOrEmpty(objectType) || string.IsNullOrEmpty(objectName))
+                return JsonHelpers.BuildToolResult(idToken,
+                    "Parameters 'objectType' and 'objectName' are required.", isError: true);
+
+            return DelegateToBridge(idToken, json, "validate_object");
+        }
+
+        private string HandleGetObjectTypeSchema(string idToken, string json)
+        {
+            string argsJson = JsonHelpers.ExtractToolArgumentsObject(json);
+            string objectType = JsonHelpers.ExtractArgString(argsJson, "objectType", "type");
+
+            if (string.IsNullOrEmpty(objectType))
+                return JsonHelpers.BuildToolResult(idToken,
+                    "Parameter 'objectType' is required.", isError: true);
+
+            return DelegateToBridge(idToken, json, "get_object_type_schema");
         }
 
         private static void AppendArrayField(StringBuilder sb, string json, string arrayKey,

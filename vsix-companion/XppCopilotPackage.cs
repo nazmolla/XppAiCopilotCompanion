@@ -55,6 +55,12 @@ namespace XppAiCopilotCompanion
 
             RegisterMcpServer(includeProbe: false);
 
+            // Write the embedded system prompt to disk so the MCP server can
+            // include it in its initialize response as the "instructions" field.
+            // Copilot clients that support MCP instructions will inject it into
+            // the system prompt automatically on every session.
+            WriteSystemPromptFile();
+
             // Start the MetaModel bridge HTTP server so the MCP server can
             // delegate to real IMetaModelService APIs inside this VS process.
             StartMetaModelBridge();
@@ -770,6 +776,22 @@ namespace XppAiCopilotCompanion
             {
                 return new[] { "<unable to read log file>" };
             }
+        }
+
+        private static void WriteSystemPromptFile()
+        {
+            try
+            {
+                string promptText = XppInstructionsProvider.GetSystemPrompt();
+                if (string.IsNullOrWhiteSpace(promptText)) return;
+
+                string dir = Path.Combine(
+                    Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
+                    "XppCopilotCompanion");
+                Directory.CreateDirectory(dir);
+                File.WriteAllText(Path.Combine(dir, "system-prompt.txt"), promptText, System.Text.Encoding.UTF8);
+            }
+            catch { }
         }
 
         private void StartMetaModelBridge()

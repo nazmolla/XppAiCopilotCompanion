@@ -55,15 +55,38 @@ namespace XppAiCopilotCompanion.MetaModel
         public string Grant { get; set; }
     }
 
+    public sealed class QueryRangeDto
+    {
+        public string Field { get; set; }
+        public string Value { get; set; }
+        public string Name { get; set; }
+    }
+
+    public sealed class QueryDataSourceDto
+    {
+        public string Name { get; set; }
+        public string Table { get; set; }
+        public string ParentDataSource { get; set; }
+        public string JoinMode { get; set; }
+        public string LinkType { get; set; }
+        public bool? DynamicFields { get; set; }
+        public bool? Relations { get; set; }
+        public bool? FirstOnly { get; set; }
+        public List<QueryRangeDto> Ranges { get; set; } = new List<QueryRangeDto>();
+        public List<QueryDataSourceDto> ChildDataSources { get; set; } = new List<QueryDataSourceDto>();
+    }
+
     // ── Request DTOs ──
 
     public sealed class CreateObjectRequest
     {
         public string ObjectType { get; set; }
         public string ObjectName { get; set; }
+        public string TypedMetadataJson { get; set; }
         public string Declaration { get; set; }
         public string[] Methods { get; set; }
         public string ModelName { get; set; }
+        public bool FormatCode { get; set; } = true;
 
         // Strongly-typed metadata
         public Dictionary<string, string> Properties { get; set; }
@@ -73,15 +96,18 @@ namespace XppAiCopilotCompanion.MetaModel
         public List<FieldGroupDto> FieldGroups { get; set; }
         public List<RelationDto> Relations { get; set; }
         public List<EntryPointDto> EntryPoints { get; set; }
+        public List<QueryDataSourceDto> DataSources { get; set; }
     }
 
     public sealed class UpdateObjectRequest
     {
         public string ObjectType { get; set; }
         public string ObjectName { get; set; }
+        public string TypedMetadataJson { get; set; }
         public string Declaration { get; set; }
         public string[] Methods { get; set; }
         public string[] RemoveMethodNames { get; set; }
+        public bool FormatCode { get; set; } = true;
 
         // Strongly-typed metadata
         public Dictionary<string, string> Properties { get; set; }
@@ -91,6 +117,7 @@ namespace XppAiCopilotCompanion.MetaModel
         public List<FieldGroupDto> FieldGroups { get; set; }
         public List<RelationDto> Relations { get; set; }
         public List<EntryPointDto> EntryPoints { get; set; }
+        public List<QueryDataSourceDto> DataSources { get; set; }
     }
 
     // ── Result DTOs ──
@@ -108,6 +135,7 @@ namespace XppAiCopilotCompanion.MetaModel
         public string Message { get; set; }
         public string ObjectType { get; set; }
         public string ObjectName { get; set; }
+        public string TypedMetadataJson { get; set; }
         public string Declaration { get; set; }
         public List<MethodInfo> Methods { get; set; } = new List<MethodInfo>();
         public string FilePath { get; set; }
@@ -122,6 +150,7 @@ namespace XppAiCopilotCompanion.MetaModel
         public List<FieldGroupDto> FieldGroups { get; set; }
         public List<RelationDto> Relations { get; set; }
         public List<EntryPointDto> EntryPoints { get; set; }
+        public List<QueryDataSourceDto> DataSources { get; set; }
     }
 
     public sealed class MethodInfo
@@ -211,11 +240,13 @@ namespace XppAiCopilotCompanion.MetaModel
     {
         public string ObjectType { get; set; }
         public string ObjectName { get; set; }
+        public string TypedMetadataJson { get; set; }
         public Dictionary<string, string> Properties { get; set; }
         public List<EnumValueDto> EnumValues { get; set; }
         public List<FieldDto> Fields { get; set; }
         public List<IndexDto> Indexes { get; set; }
         public List<RelationDto> Relations { get; set; }
+        public List<QueryDataSourceDto> DataSources { get; set; }
     }
 
     public sealed class ValidateObjectResult
@@ -228,5 +259,54 @@ namespace XppAiCopilotCompanion.MetaModel
         public string ModelName { get; set; }
         public string Message { get; set; }
         public List<string> Mismatches { get; set; } = new List<string>();
+    }
+
+    public sealed class ObjectTypeSchemaResult
+    {
+        public bool Success { get; set; }
+        public string ObjectType { get; set; }
+        public string SchemaJson { get; set; }
+        public string Message { get; set; }
+    }
+
+    public sealed class CrossReferenceItem
+    {
+        /// <summary>Raw XRef path, e.g. "/Classes/BankStatementImportModule/Methods/import"</summary>
+        public string SourcePath { get; set; }
+        /// <summary>Converted to AxClass/AxTable/etc. when recognised</summary>
+        public string SourceObjectType { get; set; }
+        public string SourceObjectName { get; set; }
+        /// <summary>Method or member name when the source is a member (e.g. a method call site)</summary>
+        public string SourceMember { get; set; }
+        /// <summary>TypeReference, MethodCall, ClassExtended, InterfaceImplementation, etc.</summary>
+        public string Kind { get; set; }
+        public int LineNumber { get; set; }
+        public string SourceModule { get; set; }
+    }
+
+    public sealed class FindReferencesResult
+    {
+        public bool Success { get; set; }
+        public string Message { get; set; }
+        public string TargetPath { get; set; }
+        public List<CrossReferenceItem> References { get; set; } = new List<CrossReferenceItem>();
+    }
+
+    public sealed class ProxyGenerationRequest
+    {
+        public List<string> ObjectTypes { get; set; } = new List<string>();
+        public string Namespace { get; set; }
+        public string OutputFilePath { get; set; }
+        public bool IncludeComments { get; set; } = true;
+    }
+
+    public sealed class ProxyGenerationResult
+    {
+        public bool Success { get; set; }
+        public string Message { get; set; }
+        public string Namespace { get; set; }
+        public string OutputFilePath { get; set; }
+        public string GeneratedCode { get; set; }
+        public List<string> GeneratedTypes { get; set; } = new List<string>();
     }
 }

@@ -310,11 +310,33 @@ namespace XppAiCopilotCompanion.McpServer
             }
         }
 
+        private static string _cachedInstructions;
+
+        static string LoadInstructions()
+        {
+            if (_cachedInstructions != null) return _cachedInstructions;
+            try
+            {
+                string path = System.IO.Path.Combine(
+                    Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
+                    "XppCopilotCompanion", "system-prompt.txt");
+                if (File.Exists(path))
+                    _cachedInstructions = File.ReadAllText(path, Encoding.UTF8);
+            }
+            catch { }
+            return _cachedInstructions ?? string.Empty;
+        }
+
         static string BuildInitializeResponse(string idToken, string requestedProtocolVersion)
         {
             string protocol = string.IsNullOrWhiteSpace(requestedProtocolVersion)
                 ? "2024-11-05"
                 : requestedProtocolVersion;
+
+            string instructions = LoadInstructions();
+            string instructionsField = string.IsNullOrWhiteSpace(instructions)
+                ? string.Empty
+                : ",\n  \"instructions\": \"" + JsonHelpers.EscapeJsonString(instructions) + "\"";
 
             string result = @"{
   ""protocolVersion"": """ + JsonHelpers.EscapeJsonString(protocol) + @""",
@@ -324,7 +346,7 @@ namespace XppAiCopilotCompanion.McpServer
   ""serverInfo"": {
     ""name"": """ + ServerName + @""",
     ""version"": """ + ServerVersion + @"""
-  }
+  }" + instructionsField + @"
 }";
             return JsonHelpers.BuildResult(idToken, result);
         }

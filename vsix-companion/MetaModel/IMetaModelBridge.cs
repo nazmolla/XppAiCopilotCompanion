@@ -21,8 +21,11 @@ namespace XppAiCopilotCompanion.MetaModel
 
         // ── Discovery ──
 
-        FindObjectResult FindObject(string objectName, string objectType, bool exactMatch);
+        FindObjectResult FindObject(string objectName, string objectType, bool exactMatch, int maxResults);
         ListObjectsResult ListObjects(string modelName, string objectType, string nameFilter, int maxResults);
+        FindReferencesResult FindReferences(string objectType, string objectName, string referenceKind, int maxResults);
+        ObjectTypeSchemaResult GetObjectTypeSchema(string objectType);
+        ProxyGenerationResult GenerateProxies(ProxyGenerationRequest request);
         ModelInfoResult GetModelInfo(string modelName);
         List<ModelSummary> ListModels();
 

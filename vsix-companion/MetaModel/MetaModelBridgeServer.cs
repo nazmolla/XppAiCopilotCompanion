@@ -150,6 +150,8 @@ namespace XppAiCopilotCompanion.MetaModel
                     return HandleFindObject(body);
                 case "list_objects":
                     return HandleListObjects(body);
+                case "find_references":
+                    return HandleFindReferences(body);
                 case "get_model_info":
                     return HandleGetModelInfo(body);
                 case "list_models":
@@ -166,6 +168,8 @@ namespace XppAiCopilotCompanion.MetaModel
                     return HandleGetEnvironment(body);
                 case "validate_object":
                     return HandleValidateObject(body);
+                case "get_object_type_schema":
+                    return HandleGetObjectTypeSchema(body);
                 default:
                     return "{\"success\":false,\"message\":\"Unknown action: " + EscapeJson(action ?? "") + "\"}";
             }
@@ -181,16 +185,19 @@ namespace XppAiCopilotCompanion.MetaModel
             {
                 ObjectType = ExtractJsonString(body, "objectType"),
                 ObjectName = ExtractJsonString(body, "objectName"),
+                TypedMetadataJson = ExtractJsonObjectRaw(body, "typedMetadata"),
                 Declaration = ExtractJsonString(body, "declaration"),
                 Methods = ExtractJsonStringArray(body, "methods"),
                 ModelName = ExtractJsonString(body, "modelName"),
+                FormatCode = !"false".Equals(ExtractJsonString(body, "formatCode"), StringComparison.OrdinalIgnoreCase),
                 Properties = ExtractJsonObject(body, "properties"),
                 EnumValues = ParseEnumValues(body),
                 Fields = ParseFields(body),
                 Indexes = ParseIndexes(body),
                 FieldGroups = ParseFieldGroups(body),
                 Relations = ParseRelations(body),
-                EntryPoints = ParseEntryPoints(body)
+                EntryPoints = ParseEntryPoints(body),
+                DataSources = ParseDataSources(body)
             };
 
             // Reject any formatted markup in declaration or methods
@@ -222,6 +229,7 @@ namespace XppAiCopilotCompanion.MetaModel
             {
                 ObjectType = req.ObjectType,
                 ObjectName = req.ObjectName,
+                TypedMetadataJson = req.TypedMetadataJson,
                 Properties = req.Properties,
                 Fields = req.Fields,
                 EnumValues = req.EnumValues,
@@ -253,16 +261,19 @@ namespace XppAiCopilotCompanion.MetaModel
             {
                 ObjectType = ExtractJsonString(body, "objectType"),
                 ObjectName = ExtractJsonString(body, "objectName"),
+                TypedMetadataJson = ExtractJsonObjectRaw(body, "typedMetadata"),
                 Declaration = ExtractJsonString(body, "declaration"),
                 Methods = ExtractJsonStringArray(body, "methods"),
                 RemoveMethodNames = ExtractJsonStringArray(body, "removeMethodNames"),
+                FormatCode = !"false".Equals(ExtractJsonString(body, "formatCode"), StringComparison.OrdinalIgnoreCase),
                 Properties = ExtractJsonObject(body, "properties"),
                 EnumValues = ParseEnumValues(body),
                 Fields = ParseFields(body),
                 Indexes = ParseIndexes(body),
                 FieldGroups = ParseFieldGroups(body),
                 Relations = ParseRelations(body),
-                EntryPoints = ParseEntryPoints(body)
+                EntryPoints = ParseEntryPoints(body),
+                DataSources = ParseDataSources(body)
             };
 
             // Reject any formatted markup in declaration or methods
@@ -289,6 +300,7 @@ namespace XppAiCopilotCompanion.MetaModel
             {
                 ObjectType = req.ObjectType,
                 ObjectName = req.ObjectName,
+                TypedMetadataJson = req.TypedMetadataJson,
                 Properties = req.Properties,
                 Fields = req.Fields,
                 EnumValues = req.EnumValues,
@@ -305,14 +317,23 @@ namespace XppAiCopilotCompanion.MetaModel
             {
                 ObjectType = ExtractJsonString(body, "objectType"),
                 ObjectName = ExtractJsonString(body, "objectName"),
+                TypedMetadataJson = ExtractJsonObjectRaw(body, "typedMetadata"),
                 Properties = ExtractJsonObject(body, "properties"),
                 Fields = ParseFields(body),
                 EnumValues = ParseEnumValues(body),
                 Indexes = ParseIndexes(body),
-                Relations = ParseRelations(body)
+                Relations = ParseRelations(body),
+                DataSources = ParseDataSources(body)
             };
             var result = _bridge.ValidateObject(req);
             return SerializeValidateResult(result);
+        }
+
+        private string HandleGetObjectTypeSchema(string body)
+        {
+            string objectType = ExtractJsonString(body, "objectType");
+            var result = _bridge.GetObjectTypeSchema(objectType);
+            return SerializeObjectTypeSchemaResult(result);
         }
 
         private string HandleDeleteObject(string body)
@@ -324,13 +345,61 @@ namespace XppAiCopilotCompanion.MetaModel
             return SerializeResult(result);
         }
 
+        private string HandleFindReferences(string body)
+        {
+            string objectType = ExtractJsonString(body, "objectType");
+            string objectName = ExtractJsonString(body, "objectName");
+            string referenceKind = ExtractJsonString(body, "referenceKind");
+            string maxStr = ExtractJsonString(body, "maxResults");
+            int maxResults = 50;
+            if (!string.IsNullOrEmpty(maxStr)) int.TryParse(maxStr, out maxResults);
+            if (maxResults < 1) maxResults = 1;
+            if (maxResults > 200) maxResults = 200;
+
+            var result = _bridge.FindReferences(objectType, objectName, referenceKind, maxResults);
+
+            var sb = new StringBuilder();
+            sb.Append("{\"success\":" + (result.Success ? "true" : "false"));
+            if (result.Message != null)
+                sb.Append(",\"message\":\"" + EscapeJson(result.Message) + "\"");
+            if (result.TargetPath != null)
+                sb.Append(",\"targetPath\":\"" + EscapeJson(result.TargetPath) + "\"");
+            sb.Append(",\"count\":" + result.References.Count);
+            sb.Append(",\"references\":[");
+            for (int i = 0; i < result.References.Count; i++)
+            {
+                if (i > 0) sb.Append(",");
+                var r = result.References[i];
+                sb.Append("{");
+                sb.Append("\"sourcePath\":\"" + EscapeJson(r.SourcePath ?? "") + "\"");
+                if (r.SourceObjectType != null)
+                    sb.Append(",\"sourceObjectType\":\"" + EscapeJson(r.SourceObjectType) + "\"");
+                if (r.SourceObjectName != null)
+                    sb.Append(",\"sourceObjectName\":\"" + EscapeJson(r.SourceObjectName) + "\"");
+                if (r.SourceMember != null)
+                    sb.Append(",\"sourceMember\":\"" + EscapeJson(r.SourceMember) + "\"");
+                sb.Append(",\"kind\":\"" + EscapeJson(r.Kind ?? "") + "\"");
+                sb.Append(",\"lineNumber\":" + r.LineNumber);
+                if (r.SourceModule != null)
+                    sb.Append(",\"sourceModule\":\"" + EscapeJson(r.SourceModule) + "\"");
+                sb.Append("}");
+            }
+            sb.Append("]}");
+            return sb.ToString();
+        }
+
         private string HandleFindObject(string body)
         {
             string objectName = ExtractJsonString(body, "objectName");
             string objectType = ExtractJsonString(body, "objectType");
             string exactStr = ExtractJsonString(body, "exactMatch");
             bool exact = "true".Equals(exactStr, StringComparison.OrdinalIgnoreCase);
-            var result = _bridge.FindObject(objectName, objectType, exact);
+            string maxStr = ExtractJsonString(body, "maxResults");
+            int maxResults = 25;
+            if (!string.IsNullOrEmpty(maxStr)) int.TryParse(maxStr, out maxResults);
+            if (maxResults < 1) maxResults = 1;
+            if (maxResults > 100) maxResults = 100;
+            var result = _bridge.FindObject(objectName, objectType, exact, maxResults);
 
             var sb = new StringBuilder();
             sb.Append("{\"success\":" + (result.Success ? "true" : "false"));
@@ -356,8 +425,10 @@ namespace XppAiCopilotCompanion.MetaModel
             string objectType = ExtractJsonString(body, "objectType");
             string nameFilter = ExtractJsonString(body, "nameFilter");
             string maxStr = ExtractJsonString(body, "maxResults");
-            int maxResults = 100;
+            int maxResults = 25;
             if (!string.IsNullOrEmpty(maxStr)) int.TryParse(maxStr, out maxResults);
+            if (maxResults < 1) maxResults = 1;
+            if (maxResults > 100) maxResults = 100;
 
             // Require nameFilter to prevent full metadata scans that time out
             if (string.IsNullOrWhiteSpace(nameFilter))
@@ -555,6 +626,20 @@ namespace XppAiCopilotCompanion.MetaModel
             return sb.ToString();
         }
 
+        private static string SerializeObjectTypeSchemaResult(ObjectTypeSchemaResult r)
+        {
+            var sb = new StringBuilder();
+            sb.Append("{\"success\":" + (r.Success ? "true" : "false"));
+            if (r.ObjectType != null)
+                sb.Append(",\"objectType\":\"" + EscapeJson(r.ObjectType) + "\"");
+            if (r.SchemaJson != null)
+                sb.Append(",\"schema\":" + r.SchemaJson);
+            if (r.Message != null)
+                sb.Append(",\"message\":\"" + EscapeJson(r.Message) + "\"");
+            sb.Append("}");
+            return sb.ToString();
+        }
+
         private string SerializeReadResult(ReadObjectResult r)
         {
             var sb = new StringBuilder();
@@ -562,6 +647,7 @@ namespace XppAiCopilotCompanion.MetaModel
             if (r.Message != null) sb.Append(",\"message\":\"" + EscapeJson(r.Message) + "\"");
             if (r.ObjectType != null) sb.Append(",\"objectType\":\"" + EscapeJson(r.ObjectType) + "\"");
             if (r.ObjectName != null) sb.Append(",\"objectName\":\"" + EscapeJson(r.ObjectName) + "\"");
+            if (r.TypedMetadataJson != null) sb.Append(",\"typedMetadata\":" + r.TypedMetadataJson);
             if (r.Declaration != null) sb.Append(",\"declaration\":\"" + EscapeJson(r.Declaration) + "\"");
             if (r.ModelName != null) sb.Append(",\"modelName\":\"" + EscapeJson(r.ModelName) + "\"");
             sb.Append(",\"isCustom\":" + (r.IsCustom ? "true" : "false"));
@@ -602,6 +688,8 @@ namespace XppAiCopilotCompanion.MetaModel
             SerializeRelations(sb, r.Relations);
             // EntryPoints
             SerializeEntryPoints(sb, r.EntryPoints);
+            // Query DataSources
+            SerializeDataSources(sb, r.DataSources);
 
             sb.Append("}");
             return sb.ToString();
@@ -730,6 +818,65 @@ namespace XppAiCopilotCompanion.MetaModel
             sb.Append("]");
         }
 
+        private static void SerializeDataSources(StringBuilder sb, System.Collections.Generic.List<QueryDataSourceDto> dataSources)
+        {
+            if (dataSources == null || dataSources.Count == 0) return;
+            sb.Append(",\"dataSources\":[");
+            for (int i = 0; i < dataSources.Count; i++)
+            {
+                if (i > 0) sb.Append(",");
+                var ds = dataSources[i];
+                sb.Append("{\"name\":\"" + EscapeJson(ds.Name ?? "") + "\"");
+                if (!string.IsNullOrEmpty(ds.Table))
+                    sb.Append(",\"table\":\"" + EscapeJson(ds.Table) + "\"");
+                if (!string.IsNullOrEmpty(ds.ParentDataSource))
+                    sb.Append(",\"parentDataSource\":\"" + EscapeJson(ds.ParentDataSource) + "\"");
+                if (!string.IsNullOrEmpty(ds.JoinMode))
+                    sb.Append(",\"joinMode\":\"" + EscapeJson(ds.JoinMode) + "\"");
+                if (!string.IsNullOrEmpty(ds.LinkType))
+                    sb.Append(",\"linkType\":\"" + EscapeJson(ds.LinkType) + "\"");
+                if (ds.DynamicFields.HasValue)
+                    sb.Append(",\"dynamicFields\":" + (ds.DynamicFields.Value ? "true" : "false"));
+                if (ds.Relations.HasValue)
+                    sb.Append(",\"relations\":" + (ds.Relations.Value ? "true" : "false"));
+                if (ds.FirstOnly.HasValue)
+                    sb.Append(",\"firstOnly\":" + (ds.FirstOnly.Value ? "true" : "false"));
+
+                if (ds.Ranges != null && ds.Ranges.Count > 0)
+                {
+                    sb.Append(",\"ranges\":[");
+                    for (int j = 0; j < ds.Ranges.Count; j++)
+                    {
+                        if (j > 0) sb.Append(",");
+                        var r = ds.Ranges[j];
+                        sb.Append("{");
+                        bool wrote = false;
+                        if (!string.IsNullOrEmpty(r.Name))
+                        {
+                            sb.Append("\"name\":\"" + EscapeJson(r.Name) + "\"");
+                            wrote = true;
+                        }
+                        if (!string.IsNullOrEmpty(r.Field))
+                        {
+                            if (wrote) sb.Append(",");
+                            sb.Append("\"field\":\"" + EscapeJson(r.Field) + "\"");
+                            wrote = true;
+                        }
+                        if (!string.IsNullOrEmpty(r.Value))
+                        {
+                            if (wrote) sb.Append(",");
+                            sb.Append("\"value\":\"" + EscapeJson(r.Value) + "\"");
+                        }
+                        sb.Append("}");
+                    }
+                    sb.Append("]");
+                }
+
+                sb.Append("}");
+            }
+            sb.Append("]");
+        }
+
         // ── Formatted content rejection helpers ──
 
         private static readonly string FormattedContentRejectionMessage =
@@ -802,6 +949,7 @@ namespace XppAiCopilotCompanion.MetaModel
             if (req.Relations == null) { req.Relations = ParseRelations(metadataStr); if (req.Relations != null) parsedCount++; }
             var beforeEntryPoints = req.EntryPoints;
             if (req.EntryPoints == null) { req.EntryPoints = ParseEntryPoints(metadataStr); if (req.EntryPoints != null) parsedCount++; }
+            if (req.DataSources == null) { req.DataSources = ParseDataSources(metadataStr); if (req.DataSources != null) parsedCount++; }
 
             if (req.Properties == null)
                 req.Properties = ExtractJsonObject(metadataStr, "properties") ?? ExtractFlatProperties(metadataStr);
@@ -847,6 +995,7 @@ namespace XppAiCopilotCompanion.MetaModel
             if (req.FieldGroups == null) { req.FieldGroups = ParseFieldGroups(metadataStr); if (req.FieldGroups != null) parsedCount++; }
             if (req.Relations == null) { req.Relations = ParseRelations(metadataStr); if (req.Relations != null) parsedCount++; }
             if (req.EntryPoints == null) { req.EntryPoints = ParseEntryPoints(metadataStr); if (req.EntryPoints != null) parsedCount++; }
+            if (req.DataSources == null) { req.DataSources = ParseDataSources(metadataStr); if (req.DataSources != null) parsedCount++; }
 
             if (req.Properties == null)
                 req.Properties = ExtractJsonObject(metadataStr, "properties") ?? ExtractFlatProperties(metadataStr);
@@ -934,6 +1083,41 @@ namespace XppAiCopilotCompanion.MetaModel
             }
             if (bracketEnd < 0) return null;
             return json.Substring(bracketStart, bracketEnd - bracketStart + 1);
+        }
+
+        private static string ExtractJsonObjectRaw(string json, string key)
+        {
+            if (json == null) return null;
+            string marker = "\"" + key + "\"";
+            int idx = json.IndexOf(marker, StringComparison.Ordinal);
+            if (idx < 0) return null;
+            int colon = json.IndexOf(':', idx + marker.Length);
+            if (colon < 0) return null;
+            int braceStart = json.IndexOf('{', colon);
+            if (braceStart < 0) return null;
+
+            int depth = 0;
+            bool inStr = false;
+            bool esc = false;
+            int braceEnd = -1;
+
+            for (int i = braceStart; i < json.Length; i++)
+            {
+                char c = json[i];
+                if (esc) { esc = false; continue; }
+                if (c == '\\') { esc = true; continue; }
+                if (c == '"') { inStr = !inStr; continue; }
+                if (inStr) continue;
+                if (c == '{') depth++;
+                if (c == '}')
+                {
+                    depth--;
+                    if (depth == 0) { braceEnd = i; break; }
+                }
+            }
+
+            if (braceEnd < 0) return null;
+            return json.Substring(braceStart, braceEnd - braceStart + 1);
         }
 
         private static System.Collections.Generic.List<string> SplitJsonObjects(string arrayJson)
@@ -1183,6 +1367,78 @@ namespace XppAiCopilotCompanion.MetaModel
             return result.Count > 0 ? result : null;
         }
 
+        private System.Collections.Generic.List<QueryDataSourceDto> ParseDataSources(string body)
+        {
+            string arrayJson = ExtractJsonArray(body, "dataSources");
+            if (arrayJson == null) return null;
+
+            var result = new System.Collections.Generic.List<QueryDataSourceDto>();
+            foreach (string obj in SplitJsonObjects(arrayJson))
+            {
+                var ds = ParseDataSourceObject(obj, null);
+                if (ds != null) result.Add(ds);
+            }
+
+            return result.Count > 0 ? result : null;
+        }
+
+        private QueryDataSourceDto ParseDataSourceObject(string objJson, string parentName)
+        {
+            string table = ExtractJsonString(objJson, "table") ?? ExtractJsonString(objJson, "tableName");
+            string name = ExtractJsonString(objJson, "name") ?? table;
+            if (string.IsNullOrWhiteSpace(name)) return null;
+
+            var dto = new QueryDataSourceDto
+            {
+                Name = name,
+                Table = table,
+                ParentDataSource = ExtractJsonString(objJson, "parentDataSource") ?? parentName,
+                JoinMode = ExtractJsonString(objJson, "joinMode"),
+                LinkType = ExtractJsonString(objJson, "linkType")
+            };
+
+            string dynamicFields = ExtractJsonString(objJson, "dynamicFields");
+            if (dynamicFields != null)
+                dto.DynamicFields = "true".Equals(dynamicFields, StringComparison.OrdinalIgnoreCase);
+
+            string relations = ExtractJsonString(objJson, "relations");
+            if (relations != null)
+                dto.Relations = "true".Equals(relations, StringComparison.OrdinalIgnoreCase);
+
+            string firstOnly = ExtractJsonString(objJson, "firstOnly");
+            if (firstOnly != null)
+                dto.FirstOnly = "true".Equals(firstOnly, StringComparison.OrdinalIgnoreCase);
+
+            string rangesJson = ExtractJsonArray(objJson, "ranges");
+            if (rangesJson != null)
+            {
+                foreach (string rangeObj in SplitJsonObjects(rangesJson))
+                {
+                    dto.Ranges.Add(new QueryRangeDto
+                    {
+                        Name = ExtractJsonString(rangeObj, "name"),
+                        Field = ExtractJsonString(rangeObj, "field") ?? ExtractJsonString(rangeObj, "dataField"),
+                        Value = ExtractJsonString(rangeObj, "value")
+                    });
+                }
+            }
+
+            string childrenJson = ExtractJsonArray(objJson, "childDataSources");
+            if (childrenJson == null)
+                childrenJson = ExtractJsonArray(objJson, "dataSources");
+
+            if (childrenJson != null)
+            {
+                foreach (string childObj in SplitJsonObjects(childrenJson))
+                {
+                    var child = ParseDataSourceObject(childObj, name);
+                    if (child != null) dto.ChildDataSources.Add(child);
+                }
+            }
+
+            return dto;
+        }
+
         // ── Flat-property extraction for metadata fallback ──
 
         /// <summary>
@@ -1195,7 +1451,7 @@ namespace XppAiCopilotCompanion.MetaModel
             {
                 "objectType", "objectName", "modelName", "declaration", "methods",
                 "enumValues", "fields", "indexes", "fieldGroups", "relations",
-                "entryPoints", "properties", "action"
+                "entryPoints", "dataSources", "typedMetadata", "properties", "action"
             };
 
         private static System.Collections.Generic.Dictionary<string, string> ExtractFlatProperties(string json)

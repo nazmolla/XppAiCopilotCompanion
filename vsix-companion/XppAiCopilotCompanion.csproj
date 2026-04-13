@@ -15,6 +15,7 @@
     <AssemblyName>XppAiCopilotCompanion</AssemblyName>
     <TargetFrameworkVersion>v4.8</TargetFrameworkVersion>
     <LangVersion>latest</LangVersion>
+    <RuntimeIdentifiers>win</RuntimeIdentifiers>
     <GenerateAssemblyInfo>false</GenerateAssemblyInfo>
     <GeneratePkgDefFile>true</GeneratePkgDefFile>
     <UseCodebase>true</UseCodebase>
@@ -90,6 +91,7 @@
        At runtime these DLLs are loaded by the MS D365FO tools VSIX in VS.
        Private=false means do NOT copy to output / ship in our VSIX. -->
   <ItemGroup>
+    <Reference Include="System.Web.Extensions" />
     <Reference Include="Microsoft.Dynamics.AX.Metadata">
       <HintPath>Samples\Microsoft.Dynamics.FinOps.ToolsVS2022\Microsoft.Dynamics.AX.Metadata.dll</HintPath>
       <Private>false</Private>
@@ -124,6 +126,11 @@
     </Reference>
     <Reference Include="Microsoft.Dynamics.Framework.Tools.Extensibility.17.0">
       <HintPath>Samples\Microsoft.Dynamics.FinOps.ToolsVS2022\Microsoft.Dynamics.Framework.Tools.Extensibility.17.0.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+    <!-- XReference API — shipped by D365 tools VSIX, not by us (Private=false) -->
+    <Reference Include="Microsoft.Dynamics.AX.Framework.Xlnt.XReference.XReferenceProviders">
+      <HintPath>Samples\Microsoft.Dynamics.FinOps.ToolsVS2022\Microsoft.Dynamics.AX.Framework.Xlnt.XReference.XReferenceProviders.dll</HintPath>
       <Private>false</Private>
     </Reference>
   </ItemGroup>
