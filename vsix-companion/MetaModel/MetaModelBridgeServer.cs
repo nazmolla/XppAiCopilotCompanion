@@ -115,19 +115,29 @@ namespace XppAiCopilotCompanion.MetaModel
             }
         }
 
+        // Timeout for bridge dispatch to the main thread (seconds).
+        // Prevents a single slow MetaModel API call from blocking the bridge indefinitely.
+        private const int DispatchTimeoutMs = 45_000;
+
         private string DispatchAction(string action, string body)
         {
             // All bridge calls must be marshalled to the VS main thread
             // because IMetaModelService is thread-affine.
             string result = null;
 
-            ThreadHelper.JoinableTaskFactory.Run(async () =>
+            var jt = ThreadHelper.JoinableTaskFactory.RunAsync(async () =>
             {
                 await ThreadHelper.JoinableTaskFactory.SwitchToMainThreadAsync();
                 result = DispatchOnMainThread(action, body);
             });
 
-            return result;
+            if (jt.Task.Wait(DispatchTimeoutMs))
+                return result;
+
+            BridgeLog("DispatchAction TIMEOUT for action=" + action + " after " + (DispatchTimeoutMs / 1000) + "s");
+            return "{\"success\":false,\"message\":\"Bridge operation timed out after "
+                + (DispatchTimeoutMs / 1000) + "s for action: " + EscapeJson(action ?? "")
+                + ". The MetaModel API call may still be running on the VS main thread.\"}";
         }
 
         private string DispatchOnMainThread(string action, string body)

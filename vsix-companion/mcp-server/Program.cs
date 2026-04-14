@@ -131,7 +131,24 @@ namespace XppAiCopilotCompanion.McpServer
                 McpLogger.Log("HTTP recv " + requestBody.Length + " chars: "
                     + (requestBody.Length > 300 ? requestBody.Substring(0, 300) + "..." : requestBody));
 
-                string response = HandleMessage(requestBody);
+                string idToken = null;
+                string response = null;
+                try
+                {
+                    // Extract id before HandleMessage so we can build an error
+                    // response even if HandleMessage throws.
+                    idToken = JsonHelpers.ExtractJsonValueToken(requestBody, "id");
+                    response = HandleMessage(requestBody);
+                }
+                catch (Exception innerEx)
+                {
+                    McpLogger.Log("HandleMessage exception: " + innerEx);
+                    response = idToken != null
+                        ? JsonHelpers.BuildError(idToken, -32603,
+                              "Internal error: " + innerEx.Message)
+                        : null;
+                }
+
                 if (response != null)
                 {
                     McpLogger.Log("HTTP send " + response.Length + " chars");

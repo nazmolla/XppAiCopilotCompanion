@@ -30,6 +30,10 @@ echo === Building %CONFIG% ===
 set MSBUILD="C:\Program Files (x86)\Microsoft Visual Studio\2019\BuildTools\MSBuild\Current\Bin\MSBuild.exe"
 if not exist %MSBUILD% (
     :: Try VS 2022 path
+    set MSBUILD="C:\Program Files (x86)\Microsoft Visual Studio\2022\BuildTools\MSBuild\Current\Bin\MSBuild.exe"
+)
+if not exist %MSBUILD% (
+    :: Alternate VS 2022 path (some machines install under Program Files)
     set MSBUILD="C:\Program Files\Microsoft Visual Studio\2022\BuildTools\MSBuild\Current\Bin\MSBuild.exe"
 )
 if not exist %MSBUILD% (
