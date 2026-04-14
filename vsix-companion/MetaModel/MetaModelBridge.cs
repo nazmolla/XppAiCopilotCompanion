@@ -2360,10 +2360,17 @@ namespace XppAiCopilotCompanion.MetaModel
                 if (dict == null) return;
 
                 // AxQuery needs concrete root/embedded datasource creation semantics.
+                // These keys are handled by the specialized method and must be excluded
+                // from the generic ApplyObjectNode pass to prevent double-clear wiping them.
+                var handledKeys = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
                 if (target is AxQuerySimple query)
+                {
                     ApplyQueryDataSourcesFromTypedMetadata(query, dict);
+                    handledKeys.Add("DataSources");
+                    handledKeys.Add("dataSources");
+                }
 
-                ApplyObjectNode(target, dict);
+                ApplyObjectNode(target, dict, handledKeys);
             }
             catch
             {
@@ -2389,12 +2396,14 @@ namespace XppAiCopilotCompanion.MetaModel
             return serializer.DeserializeObject(typedMetadataJson);
         }
 
-        private static void ApplyObjectNode(object target, Dictionary<string, object> node)
+        private static void ApplyObjectNode(object target, Dictionary<string, object> node, HashSet<string> skipKeys = null)
         {
             if (target == null || node == null) return;
 
             foreach (var kv in node)
             {
+                if (skipKeys != null && skipKeys.Contains(kv.Key)) continue;
+
                 var prop = FindProperty(target.GetType(), kv.Key);
                 if (prop == null || !prop.CanRead) continue;
 
@@ -2464,8 +2473,18 @@ namespace XppAiCopilotCompanion.MetaModel
             var values = ToObjectArray(node);
             if (values == null) return;
 
-            var addMethod = collection.GetType().GetMethod("Add");
-            if (addMethod == null || addMethod.GetParameters().Length != 1) return;
+            // Use overload-safe Add resolution — KeyedObjectCollection and similar types
+            // expose both typed and object-typed Add overloads; prefer the typed one.
+            System.Reflection.MethodInfo addMethod = null;
+            foreach (var m in collection.GetType().GetMethods(BindingFlags.Public | BindingFlags.Instance))
+            {
+                if (m.Name != "Add") continue;
+                var ps = m.GetParameters();
+                if (ps.Length != 1 || m.IsGenericMethod) continue;
+                if (ps[0].ParameterType != typeof(object)) { addMethod = m; break; }
+                if (addMethod == null) addMethod = m;
+            }
+            if (addMethod == null) return;
             Type itemType = addMethod.GetParameters()[0].ParameterType;
 
             foreach (object entry in values)
@@ -2528,8 +2547,27 @@ namespace XppAiCopilotCompanion.MetaModel
         {
             if (collection == null || node == null) return;
 
-            var addMethod = collection.GetType().GetMethod("Add");
-            if (addMethod == null || addMethod.GetParameters().Length != 1) return;
+            // KeyedObjectCollection has multiple Add overloads (typed + object).
+            // Pick the most-specific single-param Add whose parameter is not System.Object.
+            System.Reflection.MethodInfo addMethod = null;
+            foreach (var m in collection.GetType().GetMethods(BindingFlags.Public | BindingFlags.Instance))
+            {
+                if (m.Name != "Add") continue;
+                var ps = m.GetParameters();
+                if (ps.Length != 1 || m.IsGenericMethod) continue;
+                if (ps[0].ParameterType == typeof(object))
+                {
+                    // Keep as fallback only if nothing better found yet.
+                    if (addMethod == null) addMethod = m;
+                }
+                else
+                {
+                    addMethod = m;
+                    break;
+                }
+            }
+
+            if (addMethod == null) return;
 
             Type itemType = addMethod.GetParameters()[0].ParameterType;
             object dataSource = CreateDefaultInstance(itemType);
@@ -2574,8 +2612,16 @@ namespace XppAiCopilotCompanion.MetaModel
             var rangeCollection = rangesProp?.GetValue(dataSource);
             if (rangeCollection == null) return;
 
-            var addMethod = rangeCollection.GetType().GetMethod("Add");
-            if (addMethod == null || addMethod.GetParameters().Length != 1) return;
+            System.Reflection.MethodInfo addMethod = null;
+            foreach (var m in rangeCollection.GetType().GetMethods(BindingFlags.Public | BindingFlags.Instance))
+            {
+                if (m.Name != "Add") continue;
+                var ps = m.GetParameters();
+                if (ps.Length != 1 || m.IsGenericMethod) continue;
+                if (ps[0].ParameterType != typeof(object)) { addMethod = m; break; }
+                if (addMethod == null) addMethod = m;
+            }
+            if (addMethod == null) return;
             Type rangeType = addMethod.GetParameters()[0].ParameterType;
 
             ClearCollectionIfPossible(rangeCollection);
