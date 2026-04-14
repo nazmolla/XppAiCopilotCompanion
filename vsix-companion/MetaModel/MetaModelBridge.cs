@@ -3122,40 +3122,56 @@ namespace XppAiCopilotCompanion.MetaModel
             foreach (object ds in dsCollection)
             {
                 if (ds == null) continue;
-
-                var dto = new QueryDataSourceDto
-                {
-                    Name = ReadStringProperty(ds, "Name", "DataSourceName"),
-                    Table = ReadStringProperty(ds, "Table", "TableName"),
-                    ParentDataSource = ReadStringProperty(ds, "ParentDataSource", "JoinDataSource", "Parent"),
-                    JoinMode = ReadStringProperty(ds, "JoinMode"),
-                    LinkType = ReadStringProperty(ds, "LinkType")
-                };
-
-                dto.DynamicFields = ReadBoolProperty(ds, "DynamicFields");
-                dto.Relations = ReadBoolProperty(ds, "Relations");
-                dto.FirstOnly = ReadBoolProperty(ds, "FirstOnly");
-
-                var rangesProp = ds.GetType().GetProperty("Ranges");
-                var ranges = rangesProp?.GetValue(ds) as System.Collections.IEnumerable;
-                if (ranges != null)
-                {
-                    foreach (object r in ranges)
-                    {
-                        if (r == null) continue;
-                        dto.Ranges.Add(new QueryRangeDto
-                        {
-                            Name = ReadStringProperty(r, "Name"),
-                            Field = ReadStringProperty(r, "Field", "DataField", "Column"),
-                            Value = ReadStringProperty(r, "Value", "Range", "Expression")
-                        });
-                    }
-                }
-
-                result.Add(dto);
+                result.Add(ExtractDataSourceNode(ds));
             }
 
             return result;
+        }
+
+        private static QueryDataSourceDto ExtractDataSourceNode(object ds)
+        {
+            var dto = new QueryDataSourceDto
+            {
+                Name = ReadStringProperty(ds, "Name", "DataSourceName"),
+                Table = ReadStringProperty(ds, "Table", "TableName"),
+                ParentDataSource = ReadStringProperty(ds, "ParentDataSource", "JoinDataSource", "Parent"),
+                JoinMode = ReadStringProperty(ds, "JoinMode"),
+                LinkType = ReadStringProperty(ds, "LinkType")
+            };
+
+            dto.DynamicFields = ReadBoolProperty(ds, "DynamicFields");
+            dto.Relations = ReadBoolProperty(ds, "Relations");
+            dto.FirstOnly = ReadBoolProperty(ds, "FirstOnly");
+
+            var rangesProp = ds.GetType().GetProperty("Ranges");
+            var ranges = rangesProp?.GetValue(ds) as System.Collections.IEnumerable;
+            if (ranges != null)
+            {
+                foreach (object r in ranges)
+                {
+                    if (r == null) continue;
+                    dto.Ranges.Add(new QueryRangeDto
+                    {
+                        Name = ReadStringProperty(r, "Name"),
+                        Field = ReadStringProperty(r, "Field", "DataField", "Column"),
+                        Value = ReadStringProperty(r, "Value", "Range", "Expression")
+                    });
+                }
+            }
+
+            // Recurse into child DataSources
+            var childDsProp = ds.GetType().GetProperty("DataSources");
+            var childDs = childDsProp?.GetValue(ds) as System.Collections.IEnumerable;
+            if (childDs != null)
+            {
+                foreach (object child in childDs)
+                {
+                    if (child == null) continue;
+                    dto.ChildDataSources.Add(ExtractDataSourceNode(child));
+                }
+            }
+
+            return dto;
         }
 
         private static string ReadStringProperty(object target, params string[] names)

@@ -825,56 +825,72 @@ namespace XppAiCopilotCompanion.MetaModel
             for (int i = 0; i < dataSources.Count; i++)
             {
                 if (i > 0) sb.Append(",");
-                var ds = dataSources[i];
-                sb.Append("{\"name\":\"" + EscapeJson(ds.Name ?? "") + "\"");
-                if (!string.IsNullOrEmpty(ds.Table))
-                    sb.Append(",\"table\":\"" + EscapeJson(ds.Table) + "\"");
-                if (!string.IsNullOrEmpty(ds.ParentDataSource))
-                    sb.Append(",\"parentDataSource\":\"" + EscapeJson(ds.ParentDataSource) + "\"");
-                if (!string.IsNullOrEmpty(ds.JoinMode))
-                    sb.Append(",\"joinMode\":\"" + EscapeJson(ds.JoinMode) + "\"");
-                if (!string.IsNullOrEmpty(ds.LinkType))
-                    sb.Append(",\"linkType\":\"" + EscapeJson(ds.LinkType) + "\"");
-                if (ds.DynamicFields.HasValue)
-                    sb.Append(",\"dynamicFields\":" + (ds.DynamicFields.Value ? "true" : "false"));
-                if (ds.Relations.HasValue)
-                    sb.Append(",\"relations\":" + (ds.Relations.Value ? "true" : "false"));
-                if (ds.FirstOnly.HasValue)
-                    sb.Append(",\"firstOnly\":" + (ds.FirstOnly.Value ? "true" : "false"));
-
-                if (ds.Ranges != null && ds.Ranges.Count > 0)
-                {
-                    sb.Append(",\"ranges\":[");
-                    for (int j = 0; j < ds.Ranges.Count; j++)
-                    {
-                        if (j > 0) sb.Append(",");
-                        var r = ds.Ranges[j];
-                        sb.Append("{");
-                        bool wrote = false;
-                        if (!string.IsNullOrEmpty(r.Name))
-                        {
-                            sb.Append("\"name\":\"" + EscapeJson(r.Name) + "\"");
-                            wrote = true;
-                        }
-                        if (!string.IsNullOrEmpty(r.Field))
-                        {
-                            if (wrote) sb.Append(",");
-                            sb.Append("\"field\":\"" + EscapeJson(r.Field) + "\"");
-                            wrote = true;
-                        }
-                        if (!string.IsNullOrEmpty(r.Value))
-                        {
-                            if (wrote) sb.Append(",");
-                            sb.Append("\"value\":\"" + EscapeJson(r.Value) + "\"");
-                        }
-                        sb.Append("}");
-                    }
-                    sb.Append("]");
-                }
-
-                sb.Append("}");
+                SerializeDataSourceNode(sb, dataSources[i]);
             }
             sb.Append("]");
+        }
+
+        private static void SerializeDataSourceNode(StringBuilder sb, QueryDataSourceDto ds)
+        {
+            sb.Append("{\"name\":\"" + EscapeJson(ds.Name ?? "") + "\"");
+            if (!string.IsNullOrEmpty(ds.Table))
+                sb.Append(",\"table\":\"" + EscapeJson(ds.Table) + "\"");
+            if (!string.IsNullOrEmpty(ds.ParentDataSource))
+                sb.Append(",\"parentDataSource\":\"" + EscapeJson(ds.ParentDataSource) + "\"");
+            if (!string.IsNullOrEmpty(ds.JoinMode))
+                sb.Append(",\"joinMode\":\"" + EscapeJson(ds.JoinMode) + "\"");
+            if (!string.IsNullOrEmpty(ds.LinkType))
+                sb.Append(",\"linkType\":\"" + EscapeJson(ds.LinkType) + "\"");
+            if (ds.DynamicFields.HasValue)
+                sb.Append(",\"dynamicFields\":" + (ds.DynamicFields.Value ? "true" : "false"));
+            if (ds.Relations.HasValue)
+                sb.Append(",\"relations\":" + (ds.Relations.Value ? "true" : "false"));
+            if (ds.FirstOnly.HasValue)
+                sb.Append(",\"firstOnly\":" + (ds.FirstOnly.Value ? "true" : "false"));
+
+            if (ds.Ranges != null && ds.Ranges.Count > 0)
+            {
+                sb.Append(",\"ranges\":[");
+                for (int j = 0; j < ds.Ranges.Count; j++)
+                {
+                    if (j > 0) sb.Append(",");
+                    var r = ds.Ranges[j];
+                    sb.Append("{");
+                    bool wrote = false;
+                    if (!string.IsNullOrEmpty(r.Name))
+                    {
+                        sb.Append("\"name\":\"" + EscapeJson(r.Name) + "\"");
+                        wrote = true;
+                    }
+                    if (!string.IsNullOrEmpty(r.Field))
+                    {
+                        if (wrote) sb.Append(",");
+                        sb.Append("\"field\":\"" + EscapeJson(r.Field) + "\"");
+                        wrote = true;
+                    }
+                    if (!string.IsNullOrEmpty(r.Value))
+                    {
+                        if (wrote) sb.Append(",");
+                        sb.Append("\"value\":\"" + EscapeJson(r.Value) + "\"");
+                    }
+                    sb.Append("}");
+                }
+                sb.Append("]");
+            }
+
+            // Recurse into child datasources
+            if (ds.ChildDataSources != null && ds.ChildDataSources.Count > 0)
+            {
+                sb.Append(",\"dataSources\":[");
+                for (int k = 0; k < ds.ChildDataSources.Count; k++)
+                {
+                    if (k > 0) sb.Append(",");
+                    SerializeDataSourceNode(sb, ds.ChildDataSources[k]);
+                }
+                sb.Append("]");
+            }
+
+            sb.Append("}");
         }
 
         // ── Formatted content rejection helpers ──
