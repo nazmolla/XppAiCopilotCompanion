@@ -611,6 +611,8 @@ namespace XppAiCopilotCompanion.McpServer
             AppendJsonArray(sb, json, "relations", "Relations");
             // Entry Points
             AppendJsonArray(sb, json, "entryPoints", "Entry Points");
+            // Query Data Sources
+            AppendJsonArray(sb, json, "dataSources", "Data Sources");
         }
 
         private static void AppendJsonArray(StringBuilder sb, string json, string key, string label)
