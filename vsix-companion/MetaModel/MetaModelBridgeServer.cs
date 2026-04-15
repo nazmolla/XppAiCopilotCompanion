@@ -22,6 +22,11 @@ namespace XppAiCopilotCompanion.MetaModel
         private CancellationTokenSource _cts;
         private bool _running;
 
+        // Serialize access to the main thread — only one MetaModel call at a time.
+        // Additional requests wait up to DispatchQueueTimeoutMs, then fail fast.
+        private static readonly SemaphoreSlim _dispatchGate = new SemaphoreSlim(1, 1);
+        private const int DispatchQueueTimeoutMs = 3_000;
+
         private static readonly string BridgeLogPath =
             Path.Combine(Path.GetTempPath(), "XppBridge.log");
 
@@ -117,27 +122,44 @@ namespace XppAiCopilotCompanion.MetaModel
 
         // Timeout for bridge dispatch to the main thread (seconds).
         // Prevents a single slow MetaModel API call from blocking the bridge indefinitely.
-        private const int DispatchTimeoutMs = 45_000;
+        private const int DispatchTimeoutMs = 12_000;
 
         private string DispatchAction(string action, string body)
         {
-            // All bridge calls must be marshalled to the VS main thread
-            // because IMetaModelService is thread-affine.
-            string result = null;
-
-            var jt = ThreadHelper.JoinableTaskFactory.RunAsync(async () =>
+            // Serialize access: only one request dispatches to the main thread at a time.
+            // If another request is already in-flight, wait briefly then fail fast
+            // instead of queueing behind a potentially hung MetaModel API call.
+            if (!_dispatchGate.Wait(DispatchQueueTimeoutMs))
             {
-                await ThreadHelper.JoinableTaskFactory.SwitchToMainThreadAsync();
-                result = DispatchOnMainThread(action, body);
-            });
+                BridgeLog("DispatchAction QUEUED-REJECT for action=" + action + " (gate busy)");
+                return "{\"success\":false,\"message\":\"Bridge is busy processing another request. "
+                    + "Try again in a few seconds.\"}";
+            }
 
-            if (jt.Task.Wait(DispatchTimeoutMs))
-                return result;
+            try
+            {
+                // All bridge calls must be marshalled to the VS main thread
+                // because IMetaModelService is thread-affine.
+                string result = null;
 
-            BridgeLog("DispatchAction TIMEOUT for action=" + action + " after " + (DispatchTimeoutMs / 1000) + "s");
-            return "{\"success\":false,\"message\":\"Bridge operation timed out after "
-                + (DispatchTimeoutMs / 1000) + "s for action: " + EscapeJson(action ?? "")
-                + ". The MetaModel API call may still be running on the VS main thread.\"}";
+                var jt = ThreadHelper.JoinableTaskFactory.RunAsync(async () =>
+                {
+                    await ThreadHelper.JoinableTaskFactory.SwitchToMainThreadAsync();
+                    result = DispatchOnMainThread(action, body);
+                });
+
+                if (jt.Task.Wait(DispatchTimeoutMs))
+                    return result;
+
+                BridgeLog("DispatchAction TIMEOUT for action=" + action + " after " + (DispatchTimeoutMs / 1000) + "s");
+                return "{\"success\":false,\"message\":\"Bridge operation timed out after "
+                    + (DispatchTimeoutMs / 1000) + "s for action: " + EscapeJson(action ?? "")
+                    + ". The MetaModel API call may still be running on the VS main thread.\"}";
+            }
+            finally
+            {
+                _dispatchGate.Release();
+            }
         }
 
         private string DispatchOnMainThread(string action, string body)

@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Concurrent;
 using System.IO;
 using System.Net;
 using System.Text;
@@ -16,15 +17,39 @@ namespace XppAiCopilotCompanion.McpServer
         private const string DefaultBridgeUrl = "http://127.0.0.1:21330/";
         private readonly string _bridgeUrl;
 
-        // Timeout for bridge tool calls (seconds)
-        private const int CallTimeoutMs = 60_000;
-        // Timeout for health-check pings (seconds)
+        // Timeout for the HTTP request from the worker thread to the bridge
+        private const int HttpTimeoutMs = 10_000;
+        // Timeout for health-check pings
         private const int HealthTimeoutMs = 5_000;
+        // How long a Call() caller waits for its queued request to complete
+        private const int CallTimeoutMs = 15_000;
+        // Cooldown after a bridge timeout before processing the next item
+        private const int PostTimeoutCooldownMs = 3_000;
 
-        // Limit concurrent bridge calls to prevent ThreadPool exhaustion.
-        // The bridge is a single-threaded VSIX process — piling up requests
-        // only causes contention with no throughput gain.
-        private static readonly SemaphoreSlim _concurrencyGate = new SemaphoreSlim(4, 4);
+        // Serial request queue — one bridge call at a time.
+        // Prevents cascading timeouts when the bridge's VS main thread is busy.
+        private static readonly BlockingCollection<BridgeWorkItem> _queue
+            = new BlockingCollection<BridgeWorkItem>(new ConcurrentQueue<BridgeWorkItem>());
+        private static readonly Thread _worker;
+
+        static BridgeClient()
+        {
+            _worker = new Thread(ProcessQueue)
+            {
+                IsBackground = true,
+                Name = "McpBridgeQueue"
+            };
+            _worker.Start();
+        }
+
+        private sealed class BridgeWorkItem
+        {
+            public string BridgeUrl;
+            public string Action;
+            public string BodyJson;
+            public readonly ManualResetEventSlim Done = new ManualResetEventSlim(false);
+            public string Result;
+        }
 
         public BridgeClient(string bridgeUrl = null)
         {
@@ -36,7 +61,7 @@ namespace XppAiCopilotCompanion.McpServer
         /// </summary>
         private sealed class TimeoutWebClient : WebClient
         {
-            public int TimeoutMs { get; set; } = CallTimeoutMs;
+            public int TimeoutMs { get; set; } = HttpTimeoutMs;
             protected override WebRequest GetWebRequest(Uri uri)
             {
                 var req = base.GetWebRequest(uri);
@@ -66,59 +91,97 @@ namespace XppAiCopilotCompanion.McpServer
         }
 
         /// <summary>
-        /// Sends a JSON action to the bridge and returns the response JSON.
-        /// Applies a concurrency gate and per-call timeout to prevent
-        /// ThreadPool starvation when the bridge is slow.
+        /// Enqueues a bridge request and waits for the single worker thread
+        /// to process it. Returns the JSON response from the bridge, or a
+        /// timeout/error JSON if the call could not complete in time.
         /// </summary>
         public string Call(string action, string bodyJson)
         {
-            // Acquire concurrency slot (wait up to CallTimeoutMs)
-            if (!_concurrencyGate.Wait(CallTimeoutMs))
+            var item = new BridgeWorkItem
             {
-                McpLogger.Log("Bridge concurrency gate timeout for action=" + action);
-                return "{\"success\":false,\"message\":\"Bridge is overloaded — too many concurrent requests. Try again.\"}";
+                BridgeUrl = _bridgeUrl,
+                Action = action,
+                BodyJson = bodyJson
+            };
+
+            try { _queue.Add(item); }
+            catch
+            {
+                return "{\"success\":false,\"message\":\"Bridge request queue is disposed.\"}";
             }
 
-            try
-            {
-                using (var client = new TimeoutWebClient { TimeoutMs = CallTimeoutMs })
-                {
-                    client.Encoding = Encoding.UTF8;
-                    client.Headers[HttpRequestHeader.ContentType] = "application/json";
+            if (item.Done.Wait(CallTimeoutMs))
+                return item.Result;
 
-                    string requestBody = InjectAction(bodyJson, action);
-                    string response = client.UploadString(_bridgeUrl, requestBody);
-                    return response;
+            McpLogger.Log("Bridge queue wait timeout for action=" + action
+                + " (waited " + (CallTimeoutMs / 1000) + "s)");
+            return "{\"success\":false,\"message\":\"Bridge call timed out after "
+                + (CallTimeoutMs / 1000) + "s for action: " + action
+                + ". A previous request may still be in progress.\"}";
+        }
+
+        /// <summary>
+        /// Single worker thread: pulls items from the queue one at a time
+        /// and sends each to the bridge via HTTP. After a timeout, adds a
+        /// cooldown to let the bridge recover before the next call.
+        /// </summary>
+        private static void ProcessQueue()
+        {
+            foreach (var item in _queue.GetConsumingEnumerable())
+            {
+                bool timedOut = false;
+                try
+                {
+                    item.Result = ExecuteHttpCall(item.BridgeUrl, item.Action, item.BodyJson);
+                }
+                catch (WebException wex)
+                {
+                    string detail = "";
+                    if (wex.Response is HttpWebResponse resp)
+                    {
+                        using (var reader = new StreamReader(resp.GetResponseStream(), Encoding.UTF8))
+                            detail = reader.ReadToEnd();
+                    }
+
+                    if (wex.Status == WebExceptionStatus.Timeout)
+                    {
+                        timedOut = true;
+                        McpLogger.Log("Bridge HTTP TIMEOUT for action=" + item.Action);
+                        item.Result = "{\"success\":false,\"message\":\"Bridge call timed out after "
+                            + (HttpTimeoutMs / 1000) + "s for action: " + item.Action + "\"}";
+                    }
+                    else
+                    {
+                        item.Result = "{\"success\":false,\"message\":\"Bridge call failed: "
+                            + JsonHelpers.EscapeJsonString(wex.Message + " " + detail) + "\"}";
+                    }
+                }
+                catch (Exception ex)
+                {
+                    item.Result = "{\"success\":false,\"message\":\"Bridge unavailable: "
+                        + JsonHelpers.EscapeJsonString(ex.Message) + "\"}";
+                }
+                finally
+                {
+                    item.Done.Set();
+                }
+
+                if (timedOut)
+                {
+                    McpLogger.Log("Bridge cooldown " + PostTimeoutCooldownMs + "ms after timeout");
+                    Thread.Sleep(PostTimeoutCooldownMs);
                 }
             }
-            catch (WebException wex)
-            {
-                string detail = "";
-                if (wex.Response is HttpWebResponse resp)
-                {
-                    using (var reader = new StreamReader(resp.GetResponseStream(), Encoding.UTF8))
-                        detail = reader.ReadToEnd();
-                }
+        }
 
-                // Surface timeout specifically so callers see clear feedback
-                if (wex.Status == WebExceptionStatus.Timeout)
-                {
-                    McpLogger.Log("Bridge call TIMEOUT for action=" + action);
-                    return "{\"success\":false,\"message\":\"Bridge call timed out after "
-                        + (CallTimeoutMs / 1000) + "s for action: " + action + "\"}";
-                }
-
-                return "{\"success\":false,\"message\":\"Bridge call failed: "
-                    + JsonHelpers.EscapeJsonString(wex.Message + " " + detail) + "\"}";
-            }
-            catch (Exception ex)
+        private static string ExecuteHttpCall(string bridgeUrl, string action, string bodyJson)
+        {
+            using (var client = new TimeoutWebClient { TimeoutMs = HttpTimeoutMs })
             {
-                return "{\"success\":false,\"message\":\"Bridge unavailable: "
-                    + JsonHelpers.EscapeJsonString(ex.Message) + "\"}";
-            }
-            finally
-            {
-                _concurrencyGate.Release();
+                client.Encoding = Encoding.UTF8;
+                client.Headers[HttpRequestHeader.ContentType] = "application/json";
+                string requestBody = InjectAction(bodyJson, action);
+                return client.UploadString(bridgeUrl, requestBody);
             }
         }
 
