@@ -200,6 +200,9 @@ The extension crawls the open solution's metadata files in real time, scores the
 | **Old-style csproj (not SDK-style)** | Required for VSIX projects with VSCT command tables and `Microsoft.VsSDK.targets`. |
 | **Token budget system** | Prevents context from consuming the entire AI token window. Configurable via Options page. |
 | **D365FO config auto-detection** | Reads the active configuration from the registry (`CurrentMetadataConfig`) and the corresponding JSON file under `%LOCALAPPDATA%\Microsoft\Dynamics365\XPPConfig`. Zero-config for developers who already have D365FO set up. |
+| **Serial request queue (BridgeClient)** | All MCP→Bridge HTTP calls are funnelled through a `BlockingCollection` with a single worker thread. This prevents concurrent requests from racing on the VS main thread and causing deadlocks. |
+| **Cascade timeout prevention (Bridge)** | When a `DispatchAction` call times out (e.g. a hung `DeleteTile`), the dispatch gate (`SemaphoreSlim`) is **held** until the hung task eventually completes. Subsequent requests fail fast with "bridge busy" (~3 s) instead of each one blocking for the full dispatch timeout and cascading failures across all remaining types. |
+| **Cancelled-item skip (MCP queue)** | When a caller in the MCP server times out waiting for the serial queue, it marks the work item as cancelled. The queue worker skips cancelled items instead of sending a wasted HTTP call to the bridge. |
 
 ---
 
@@ -217,7 +220,8 @@ vsix-companion/
 │   │                                    #   ApplyFields, ApplyIndexes, ApplyRelations,
 │   │                                    #   ExtractProperties, ExtractFields, etc.
 │   ├── MetaModelBridgeServer.cs         # HTTP server (port 21330) — JSON parsing/serialization,
-│   │                                    #   request routing to MetaModelBridge
+│   │                                    #   request routing to MetaModelBridge, dispatch gate
+│   │                                    #   with hold-on-timeout cascade prevention
 │   └── MetaModelContracts.cs            # Strongly-typed DTOs: CreateObjectRequest,
 │                                        #   UpdateObjectRequest, ReadObjectResult, EnumValueDto,
 │                                        #   FieldDto, IndexDto, FieldGroupDto, RelationDto, etc.
@@ -225,7 +229,8 @@ vsix-companion/
 ├── mcp-server/                           # ── MCP Server (standalone exe) ──
 │   ├── Program.cs                       # Entry point — SSE/HTTP MCP server on port 21329
 │   ├── ToolRouter.cs                    # 14 tool definitions with JSON Schema, routing logic
-│   ├── BridgeClient.cs                  # HTTP client → MetaModel Bridge (port 21330)
+│   ├── BridgeClient.cs                  # HTTP client → MetaModel Bridge (port 21330),
+│   │                                    #   serial queue (BlockingCollection), cancelled-item skip
 │   ├── DocSearchHandler.cs              # xpp_search_docs handler (Microsoft Learn scraping)
 │   ├── HtmlExtractor.cs                # HTML → text extraction for doc search
 │   ├── JsonHelpers.cs                   # JSON utilities
@@ -406,6 +411,17 @@ Copilot Chat                    MCP Server (21329)           MetaModel Bridge (2
     │       tool result (JSON)      │                               │
     │ <─────────────────────────────│                               │
 ```
+
+### MCP ↔ Bridge Reliability
+
+The MCP server and MetaModel Bridge use several interlocking mechanisms to stay responsive even when individual MetaModel API calls hang or time out:
+
+1. **Serial request queue** — `BridgeClient` feeds all outbound HTTP requests through a `BlockingCollection` with a single worker thread. This guarantees one-at-a-time execution and prevents concurrent VS main-thread marshalling from deadlocking.
+2. **Dispatch gate with hold-on-timeout** — `MetaModelBridgeServer.DispatchAction` acquires a `SemaphoreSlim(1,1)` before marshalling to the main thread. If the call times out, the gate is **not released** until the hung task completes (via a `ContinueWith` callback). This prevents new requests from piling up behind a blocked main thread.
+3. **Cancelled-item skip** — When the `BridgeClient.Call()` caller times out waiting for the queue, it sets a `Cancelled` flag on the work item. The queue worker checks this flag before making the HTTP call and skips cancelled items, avoiding wasted round-trips.
+4. **Post-timeout cooldown** — After a timeout, `BridgeClient` sleeps for a configurable cooldown period to give the bridge time to recover before the next request.
+
+These layers mean that a single hung API call (e.g. `DeleteTile`) no longer cascades into timeouts for every subsequent request.
 
 ### System Prompt Injection
 

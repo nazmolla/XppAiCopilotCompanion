@@ -9,15 +9,17 @@ catch {
 
 $endpoint    = 'http://127.0.0.1:21329/'
 $reportPath  = 'c:\Users\MohamedNazmi\source\repos\AIDEVTOOLS\mcp-replication-failures.md'
-$mcpCallTimeoutSec = 30
-$mcpWriteTimeoutSec = 60
+$mcpCallTimeoutSec = 10
+$mcpWriteTimeoutSec = 10
 
 $types = @(
-    'AxClass','AxTable','AxView','AxDataEntityView','AxMap','AxEdt','AxEnum','AxForm','AxTile','AxMenu',
+    'AxClass','AxTable','AxView','AxDataEntityView','AxMap','AxEdt','AxEnum','AxForm','AxMenu',
     'AxMenuItemDisplay','AxMenuItemOutput','AxMenuItemAction','AxQuery','AxSecurityPrivilege','AxSecurityDuty',
     'AxSecurityRole','AxService','AxServiceGroup','AxConfigurationKey','AxTableExtension','AxFormExtension',
     'AxEnumExtension','AxEdtExtension','AxViewExtension','AxMenuExtension','AxMenuItemDisplayExtension',
-    'AxMenuItemOutputExtension','AxMenuItemActionExtension','AxQuerySimpleExtension','AxSecurityDutyExtension','AxSecurityRoleExtension'
+    'AxMenuItemOutputExtension','AxMenuItemActionExtension','AxQuerySimpleExtension','AxSecurityDutyExtension',
+    'AxSecurityRoleExtension',
+    'AxTile'  # Last — DeleteTile can hang the bridge
 )
 
 function Invoke-Mcp {
@@ -270,6 +272,8 @@ function Get-SampleViaMcp {
 
 $results   = @()
 $timestamp = Get-Date -Format 'yyyyMMddHHmmss'
+$consecutiveFailures = 0
+$maxConsecutiveFailures = 2
 
 $script:activeProjectModel = Get-ActiveProjectModel
 if (-not [string]::IsNullOrWhiteSpace($script:activeProjectModel)) {
@@ -279,6 +283,20 @@ if (-not [string]::IsNullOrWhiteSpace($script:activeProjectModel)) {
 }
 
 foreach ($type in $types) {
+    # Circuit breaker: stop after N consecutive failures (likely cascade / bridge down)
+    if ($consecutiveFailures -ge $maxConsecutiveFailures) {
+        Write-Host "STOPPING: $consecutiveFailures consecutive failures — bridge may be hung. Skipping remaining types." -ForegroundColor Red
+        foreach ($remaining in $types[($types.IndexOf($type))..($types.Count-1)]) {
+            $results += [pscustomobject]@{
+                ObjectType = $remaining; SampleObject = ''; NewObject = ''; TargetModel = ''
+                SampleModel = ''; ReadStatus = 'Skipped'; CreateStatus = 'Skipped'
+                ValidateStatus = 'Skipped'; CompareStatus = 'Skipped'; DeleteStatus = 'Skipped'
+                Notes = 'Skipped: circuit breaker after consecutive failures.'; SampleSource = 'None'; MetadataSections = ''
+            }
+        }
+        break
+    }
+
     Write-Host "Testing $type ..." -ForegroundColor Cyan
 
     # --- Step 1: resolve sample object via persisted folder-exploration artifacts ---
@@ -431,6 +449,10 @@ foreach ($type in $types) {
 
     $validateStatus = if ($validate) { if ($validatePassed) { 'Passed' } else { 'Failed' } } else { 'Skipped' }
     $deleteStatus   = if ($delete)   { if ($delete.IsError)  { 'Failed' } else { 'Passed' } } else { 'Skipped' }
+
+    # Track consecutive failures for circuit breaker
+    $typeHadFailure = ($read.IsError -or $create.IsError)
+    if ($typeHadFailure) { $consecutiveFailures++ } else { $consecutiveFailures = 0 }
 
     Write-Host "  Validate: $validateStatus  Compare: $compareStatus  Delete: $deleteStatus" -ForegroundColor Gray
 

@@ -136,6 +136,7 @@ namespace XppAiCopilotCompanion.MetaModel
                     + "Try again in a few seconds.\"}";
             }
 
+            bool gateReleased = false;
             try
             {
                 // All bridge calls must be marshalled to the VS main thread
@@ -151,14 +152,28 @@ namespace XppAiCopilotCompanion.MetaModel
                 if (jt.Task.Wait(DispatchTimeoutMs))
                     return result;
 
-                BridgeLog("DispatchAction TIMEOUT for action=" + action + " after " + (DispatchTimeoutMs / 1000) + "s");
+                // Timeout — the main thread is still occupied by the hung call.
+                // Do NOT release the gate here. If we release, the next request
+                // will acquire it and also hang on SwitchToMainThreadAsync(),
+                // causing a cascade of timeouts for every subsequent request.
+                // Instead, hold the gate and release it only when the hung task
+                // eventually completes (or is abandoned).
+                gateReleased = true;
+                jt.Task.ContinueWith(_ =>
+                {
+                    _dispatchGate.Release();
+                    BridgeLog("DispatchAction gate released after hung " + action + " completed.");
+                });
+
+                BridgeLog("DispatchAction TIMEOUT for action=" + action + " after " + (DispatchTimeoutMs / 1000) + "s — gate held until task completes");
                 return "{\"success\":false,\"message\":\"Bridge operation timed out after "
                     + (DispatchTimeoutMs / 1000) + "s for action: " + EscapeJson(action ?? "")
                     + ". The MetaModel API call may still be running on the VS main thread.\"}";
             }
             finally
             {
-                _dispatchGate.Release();
+                if (!gateReleased)
+                    _dispatchGate.Release();
             }
         }
 

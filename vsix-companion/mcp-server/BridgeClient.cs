@@ -49,6 +49,7 @@ namespace XppAiCopilotCompanion.McpServer
             public string BodyJson;
             public readonly ManualResetEventSlim Done = new ManualResetEventSlim(false);
             public string Result;
+            public volatile bool Cancelled;
         }
 
         public BridgeClient(string bridgeUrl = null)
@@ -113,6 +114,10 @@ namespace XppAiCopilotCompanion.McpServer
             if (item.Done.Wait(CallTimeoutMs))
                 return item.Result;
 
+            // Mark as cancelled so the worker thread skips this item
+            // instead of making a wasted HTTP call to the bridge.
+            item.Cancelled = true;
+
             McpLogger.Log("Bridge queue wait timeout for action=" + action
                 + " (waited " + (CallTimeoutMs / 1000) + "s)");
             return "{\"success\":false,\"message\":\"Bridge call timed out after "
@@ -129,6 +134,15 @@ namespace XppAiCopilotCompanion.McpServer
         {
             foreach (var item in _queue.GetConsumingEnumerable())
             {
+                // Skip items whose caller already timed out — no point
+                // making an HTTP call when nobody is waiting for the result.
+                if (item.Cancelled)
+                {
+                    McpLogger.Log("Skipping cancelled queue item for action=" + item.Action);
+                    item.Done.Set();
+                    continue;
+                }
+
                 bool timedOut = false;
                 try
                 {
