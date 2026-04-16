@@ -18,13 +18,13 @@ namespace XppAiCopilotCompanion.McpServer
         private readonly string _bridgeUrl;
 
         // Timeout for the HTTP request from the worker thread to the bridge
-        private const int HttpTimeoutMs = 10_000;
+        private const int HttpTimeoutMs = 15_000;
         // Timeout for health-check pings
         private const int HealthTimeoutMs = 5_000;
         // How long a Call() caller waits for its queued request to complete
-        private const int CallTimeoutMs = 15_000;
+        private const int CallTimeoutMs = 18_000;
         // Cooldown after a bridge timeout before processing the next item
-        private const int PostTimeoutCooldownMs = 3_000;
+        private const int PostTimeoutCooldownMs = 1_000;
 
         // Serial request queue — one bridge call at a time.
         // Prevents cascading timeouts when the bridge's VS main thread is busy.

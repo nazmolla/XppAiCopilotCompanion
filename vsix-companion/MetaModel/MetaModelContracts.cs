@@ -97,6 +97,31 @@ namespace XppAiCopilotCompanion.MetaModel
         public List<RelationDto> Relations { get; set; }
         public List<EntryPointDto> EntryPoints { get; set; }
         public List<QueryDataSourceDto> DataSources { get; set; }
+
+        /// <summary>
+        /// Convert to an UpdateObjectRequest so Create can delegate metadata
+        /// application to the Update path (single code path).
+        /// </summary>
+        public UpdateObjectRequest ToUpdateRequest()
+        {
+            return new UpdateObjectRequest
+            {
+                ObjectType = ObjectType,
+                ObjectName = ObjectName,
+                TypedMetadataJson = TypedMetadataJson,
+                Declaration = Declaration,
+                Methods = Methods,
+                FormatCode = FormatCode,
+                Properties = Properties,
+                EnumValues = EnumValues,
+                Fields = Fields,
+                Indexes = Indexes,
+                FieldGroups = FieldGroups,
+                Relations = Relations,
+                EntryPoints = EntryPoints,
+                DataSources = DataSources
+            };
+        }
     }
 
     public sealed class UpdateObjectRequest
@@ -246,6 +271,8 @@ namespace XppAiCopilotCompanion.MetaModel
         public List<FieldDto> Fields { get; set; }
         public List<IndexDto> Indexes { get; set; }
         public List<RelationDto> Relations { get; set; }
+        public List<FieldGroupDto> FieldGroups { get; set; }
+        public List<EntryPointDto> EntryPoints { get; set; }
         public List<QueryDataSourceDto> DataSources { get; set; }
     }
 

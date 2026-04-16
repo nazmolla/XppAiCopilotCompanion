@@ -12,8 +12,8 @@
   -->
   <PropertyGroup>
     <VersionMajor>0</VersionMajor>
-    <VersionMinor>3</VersionMinor>
-    <VersionPatch>315</VersionPatch>
+    <VersionMinor>4</VersionMinor>
+    <VersionPatch>1</VersionPatch>
     <VersionSuffix></VersionSuffix>
 
     <!-- Derived â€” do not edit -->

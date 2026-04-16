@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.IO;
 using System.Net;
 using System.Text;
@@ -124,8 +125,14 @@ namespace XppAiCopilotCompanion.MetaModel
         // Prevents a single slow MetaModel API call from blocking the bridge indefinitely.
         private const int DispatchTimeoutMs = 12_000;
 
+        // If a previous dispatch timed out, this holds the still-running task.
+        // The next dispatch drains it before starting a new UI-thread operation.
+        private static volatile System.Threading.Tasks.Task _hungTask;
+
         private string DispatchAction(string action, string body)
         {
+            BridgeLog("DispatchAction BEGIN action=" + action);
+
             // Serialize access: only one request dispatches to the main thread at a time.
             // If another request is already in-flight, wait briefly then fail fast
             // instead of queueing behind a potentially hung MetaModel API call.
@@ -136,44 +143,56 @@ namespace XppAiCopilotCompanion.MetaModel
                     + "Try again in a few seconds.\"}";
             }
 
-            bool gateReleased = false;
+            BridgeLog("DispatchAction GATE-ACQUIRED action=" + action);
+
             try
             {
+                // If a previous dispatch timed out and left a hung task on the UI thread,
+                // wait for it to finish before starting a new one. This prevents piling
+                // onto a busy UI thread which would just cause another timeout.
+                var prev = _hungTask;
+                if (prev != null && !prev.IsCompleted)
+                {
+                    BridgeLog("DispatchAction draining previous hung task before action=" + action);
+                    if (!prev.Wait(DispatchTimeoutMs))
+                    {
+                        BridgeLog("DispatchAction drain timeout — UI thread still blocked, failing fast for action=" + action);
+                        return "{\"success\":false,\"message\":\"Bridge UI thread is still blocked by a previous operation. "
+                            + "Try again shortly.\"}";
+                    }
+                    BridgeLog("DispatchAction drained previous hung task OK");
+                }
+                _hungTask = null;
+
                 // All bridge calls must be marshalled to the VS main thread
                 // because IMetaModelService is thread-affine.
                 string result = null;
 
+                BridgeLog("DispatchAction PRE-JTF action=" + action);
                 var jt = ThreadHelper.JoinableTaskFactory.RunAsync(async () =>
                 {
                     await ThreadHelper.JoinableTaskFactory.SwitchToMainThreadAsync();
+                    BridgeLog("DispatchAction ON-UI-THREAD action=" + action);
                     result = DispatchOnMainThread(action, body);
+                    BridgeLog("DispatchAction HANDLER-DONE action=" + action);
                 });
 
                 if (jt.Task.Wait(DispatchTimeoutMs))
-                    return result;
-
-                // Timeout — the main thread is still occupied by the hung call.
-                // Do NOT release the gate here. If we release, the next request
-                // will acquire it and also hang on SwitchToMainThreadAsync(),
-                // causing a cascade of timeouts for every subsequent request.
-                // Instead, hold the gate and release it only when the hung task
-                // eventually completes (or is abandoned).
-                gateReleased = true;
-                jt.Task.ContinueWith(_ =>
                 {
-                    _dispatchGate.Release();
-                    BridgeLog("DispatchAction gate released after hung " + action + " completed.");
-                });
+                    BridgeLog("DispatchAction COMPLETED action=" + action);
+                    return result;
+                }
 
-                BridgeLog("DispatchAction TIMEOUT for action=" + action + " after " + (DispatchTimeoutMs / 1000) + "s — gate held until task completes");
+                // Timeout — store the hung task so the next dispatch can drain it.
+                _hungTask = jt.Task;
+                BridgeLog("DispatchAction TIMEOUT for action=" + action + " after " + (DispatchTimeoutMs / 1000) + "s");
                 return "{\"success\":false,\"message\":\"Bridge operation timed out after "
                     + (DispatchTimeoutMs / 1000) + "s for action: " + EscapeJson(action ?? "")
                     + ". The MetaModel API call may still be running on the VS main thread.\"}";
             }
             finally
             {
-                if (!gateReleased)
-                    _dispatchGate.Release();
+                _dispatchGate.Release();
             }
         }
 
@@ -191,8 +210,6 @@ namespace XppAiCopilotCompanion.MetaModel
                     return HandleReadObjectByPath(body);
                 case "update_object":
                     return HandleUpdateObject(body);
-                case "delete_object":
-                    return HandleDeleteObject(body);
                 case "find_object":
                     return HandleFindObject(body);
                 case "list_objects":
@@ -272,17 +289,10 @@ namespace XppAiCopilotCompanion.MetaModel
             }
 
             // Post-creation validation: verify object exists in project and metadata applied
-            var validation = _bridge.ValidateObject(new ValidateObjectRequest
-            {
-                ObjectType = req.ObjectType,
-                ObjectName = req.ObjectName,
-                TypedMetadataJson = req.TypedMetadataJson,
-                Properties = req.Properties,
-                Fields = req.Fields,
-                EnumValues = req.EnumValues,
-                Indexes = req.Indexes,
-                Relations = req.Relations
-            });
+            var validation = _bridge.ValidateObject(BuildValidateRequest(
+                req.ObjectType, req.ObjectName, req.TypedMetadataJson,
+                req.Properties, req.Fields, req.EnumValues, req.Indexes,
+                req.Relations, req.FieldGroups, req.EntryPoints, req.DataSources));
 
             return SerializeResultWithValidation(result, validation);
         }
@@ -291,7 +301,9 @@ namespace XppAiCopilotCompanion.MetaModel
         {
             string objectType = ExtractJsonString(body, "objectType");
             string objectName = ExtractJsonString(body, "objectName");
+            BridgeLog("HandleReadObject type=" + objectType + " name=" + objectName);
             var result = _bridge.ReadObject(objectType, objectName);
+            BridgeLog("HandleReadObject DONE type=" + objectType + " name=" + objectName + " success=" + result?.Success);
             return SerializeReadResult(result);
         }
 
@@ -343,36 +355,60 @@ namespace XppAiCopilotCompanion.MetaModel
             }
 
             // Post-update validation: verify metadata was applied
-            var validation = _bridge.ValidateObject(new ValidateObjectRequest
-            {
-                ObjectType = req.ObjectType,
-                ObjectName = req.ObjectName,
-                TypedMetadataJson = req.TypedMetadataJson,
-                Properties = req.Properties,
-                Fields = req.Fields,
-                EnumValues = req.EnumValues,
-                Indexes = req.Indexes,
-                Relations = req.Relations
-            });
+            var validation = _bridge.ValidateObject(BuildValidateRequest(
+                req.ObjectType, req.ObjectName, req.TypedMetadataJson,
+                req.Properties, req.Fields, req.EnumValues, req.Indexes,
+                req.Relations, req.FieldGroups, req.EntryPoints, req.DataSources));
 
             return SerializeResultWithValidation(result, validation);
         }
 
+        private ValidateObjectRequest BuildValidateRequest(string objectType, string objectName,
+            string typedMetadataJson,
+            Dictionary<string, string> properties,
+            List<FieldDto> fields,
+            List<EnumValueDto> enumValues,
+            List<IndexDto> indexes,
+            List<RelationDto> relations,
+            List<FieldGroupDto> fieldGroups,
+            List<EntryPointDto> entryPoints,
+            List<QueryDataSourceDto> dataSources)
+        {
+            return new ValidateObjectRequest
+            {
+                ObjectType = objectType,
+                ObjectName = objectName,
+                TypedMetadataJson = typedMetadataJson,
+                Properties = properties,
+                Fields = fields,
+                EnumValues = enumValues,
+                Indexes = indexes,
+                Relations = relations,
+                FieldGroups = fieldGroups,
+                EntryPoints = entryPoints,
+                DataSources = dataSources
+            };
+        }
+
         private string HandleValidateObject(string body)
         {
-            var req = new ValidateObjectRequest
-            {
-                ObjectType = ExtractJsonString(body, "objectType"),
-                ObjectName = ExtractJsonString(body, "objectName"),
-                TypedMetadataJson = ExtractJsonObjectRaw(body, "typedMetadata"),
-                Properties = ExtractJsonObject(body, "properties"),
-                Fields = ParseFields(body),
-                EnumValues = ParseEnumValues(body),
-                Indexes = ParseIndexes(body),
-                Relations = ParseRelations(body),
-                DataSources = ParseDataSources(body)
-            };
+            string objectType = ExtractJsonString(body, "objectType");
+            string objectName = ExtractJsonString(body, "objectName");
+            BridgeLog("HandleValidateObject type=" + objectType + " name=" + objectName);
+            var req = BuildValidateRequest(
+                objectType,
+                objectName,
+                ExtractJsonObjectRaw(body, "typedMetadata"),
+                ExtractJsonObject(body, "properties"),
+                ParseFields(body),
+                ParseEnumValues(body),
+                ParseIndexes(body),
+                ParseRelations(body),
+                ParseFieldGroups(body),
+                ParseEntryPoints(body),
+                ParseDataSources(body));
             var result = _bridge.ValidateObject(req);
+            BridgeLog("HandleValidateObject DONE type=" + objectType + " name=" + objectName + " valid=" + result?.Valid);
             return SerializeValidateResult(result);
         }
 
@@ -381,15 +417,6 @@ namespace XppAiCopilotCompanion.MetaModel
             string objectType = ExtractJsonString(body, "objectType");
             var result = _bridge.GetObjectTypeSchema(objectType);
             return SerializeObjectTypeSchemaResult(result);
-        }
-
-        private string HandleDeleteObject(string body)
-        {
-            string objectType = ExtractJsonString(body, "objectType");
-            string objectName = ExtractJsonString(body, "objectName");
-            string modelName = ExtractJsonString(body, "modelName");
-            var result = _bridge.DeleteObject(objectType, objectName, modelName);
-            return SerializeResult(result);
         }
 
         private string HandleFindReferences(string body)
@@ -1076,11 +1103,43 @@ namespace XppAiCopilotCompanion.MetaModel
 
         // ── Typed metadata parsing helpers ──
 
+        /// <summary>
+        /// Find a JSON key only at the top level of the outermost object (depth 1).
+        /// Prevents matching keys nested inside child objects/arrays.
+        /// Returns the index of the opening quote of the key, or -1 if not found.
+        /// </summary>
+        private static int FindTopLevelKey(string json, string key)
+        {
+            if (json == null) return -1;
+            string marker = "\"" + key + "\"";
+            int depth = 0;
+            bool inStr = false;
+            bool esc = false;
+            for (int i = 0; i < json.Length; i++)
+            {
+                char c = json[i];
+                if (esc) { esc = false; continue; }
+                if (c == '\\') { esc = true; continue; }
+                // Check for marker match BEFORE toggling string state
+                if (!inStr && depth == 1 && c == '"'
+                    && i + marker.Length <= json.Length
+                    && string.CompareOrdinal(json, i, marker, 0, marker.Length) == 0)
+                {
+                    return i;
+                }
+                if (c == '"') { inStr = !inStr; continue; }
+                if (inStr) continue;
+                if (c == '{' || c == '[') depth++;
+                if (c == '}' || c == ']') depth--;
+            }
+            return -1;
+        }
+
         private static System.Collections.Generic.Dictionary<string, string> ExtractJsonObject(string json, string key)
         {
             if (json == null) return null;
             string marker = "\"" + key + "\"";
-            int idx = json.IndexOf(marker, StringComparison.Ordinal);
+            int idx = FindTopLevelKey(json, key);
             if (idx < 0) return null;
             int colon = json.IndexOf(':', idx + marker.Length);
             if (colon < 0) return null;
@@ -1126,7 +1185,7 @@ namespace XppAiCopilotCompanion.MetaModel
         {
             if (json == null) return null;
             string marker = "\"" + key + "\"";
-            int idx = json.IndexOf(marker, StringComparison.Ordinal);
+            int idx = FindTopLevelKey(json, key);
             if (idx < 0) return null;
             int colon = json.IndexOf(':', idx + marker.Length);
             if (colon < 0) return null;
@@ -1152,7 +1211,7 @@ namespace XppAiCopilotCompanion.MetaModel
         {
             if (json == null) return null;
             string marker = "\"" + key + "\"";
-            int idx = json.IndexOf(marker, StringComparison.Ordinal);
+            int idx = FindTopLevelKey(json, key);
             if (idx < 0) return null;
             int colon = json.IndexOf(':', idx + marker.Length);
             if (colon < 0) return null;
@@ -1577,7 +1636,7 @@ namespace XppAiCopilotCompanion.MetaModel
         {
             if (json == null) return null;
             string pattern = "\"" + key + "\"";
-            int idx = json.IndexOf(pattern, StringComparison.Ordinal);
+            int idx = FindTopLevelKey(json, key);
             if (idx < 0) return null;
             int colon = json.IndexOf(':', idx + pattern.Length);
             if (colon < 0) return null;
@@ -1646,7 +1705,7 @@ namespace XppAiCopilotCompanion.MetaModel
         {
             if (json == null) return null;
             string pattern = "\"" + key + "\"";
-            int idx = json.IndexOf(pattern, StringComparison.Ordinal);
+            int idx = FindTopLevelKey(json, key);
             if (idx < 0) return null;
             int colon = json.IndexOf(':', idx + pattern.Length);
             if (colon < 0) return null;

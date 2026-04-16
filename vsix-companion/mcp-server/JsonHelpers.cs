@@ -51,8 +51,35 @@ namespace XppAiCopilotCompanion.McpServer
         {
             if (json == null) return null;
             string pattern = "\"" + key + "\"";
-            int idx = json.IndexOf(pattern, StringComparison.Ordinal);
-            if (idx < 0) return null;
+
+            // Search for the key only at the top level of the JSON object (depth 1).
+            // This prevents matching nested keys like "name" inside arrays/objects.
+            int searchFrom = 0;
+            int idx = -1;
+            while (true)
+            {
+                idx = json.IndexOf(pattern, searchFrom, StringComparison.Ordinal);
+                if (idx < 0) return null;
+
+                // Calculate the depth at this position by counting unmatched braces/brackets
+                int depth = 0;
+                bool inStr = false;
+                bool esc = false;
+                for (int i = 0; i < idx; i++)
+                {
+                    char ch = json[i];
+                    if (esc) { esc = false; continue; }
+                    if (ch == '\\') { esc = true; continue; }
+                    if (ch == '"') { inStr = !inStr; continue; }
+                    if (inStr) continue;
+                    if (ch == '{' || ch == '[') depth++;
+                    else if (ch == '}' || ch == ']') depth--;
+                }
+
+                // depth 1 = inside the top-level { }, not deeper
+                if (depth <= 1) break;
+                searchFrom = idx + pattern.Length;
+            }
 
             int colonIdx = json.IndexOf(':', idx + pattern.Length);
             if (colonIdx < 0) return null;

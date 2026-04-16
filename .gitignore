@@ -23,8 +23,29 @@ Desktop.ini
 # VS Code workspace
 .vscode/
 
+# Cursor IDE
+.cursor/
+
 # D365FO SDK DLLs (extracted from MS VSIX, not redistributable)
 vsix-companion/Samples/
 
-# Temporary scan artifacts
+# Debug / diagnostic artifacts
+*.tmp
+*.log
+diag-*.txt
+debug-*.txt
+clone-*.txt
+bridge-*.txt
+sample-read.txt
+mcp-test-results.txt
+mcp-replication-failures.md
+mcp-discovery-artifacts.json
+mcp-server-log*.tmp
+
+# Scan artifacts
+base-folder-names.json
+base-samples-scan.json
 dll-scan-results.txt
+scan-base-*.ps1
+debug-table-compare.ps1
+run-audit-table-only.ps1

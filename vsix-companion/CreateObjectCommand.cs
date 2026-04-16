@@ -35,7 +35,7 @@ namespace XppAiCopilotCompanion
                 "X++ Create Object",
                 "Object type:\n"
                 + "  Data: AxClass, AxTable, AxTableExtension, AxView, AxDataEntityView,\n"
-                + "        AxCompositeDataEntityView, AxMap, AxEdt, AxEdtExtension,\n"
+                + "        AxCompositeDataEntityView, AxEdt, AxEdtExtension,\n"
                 + "        AxEnum, AxEnumExtension\n"
                 + "  UI:   AxForm, AxFormExtension, AxTile\n"
                 + "  Menu: AxMenu, AxMenuExtension, AxMenuItemDisplay,\n"

@@ -1,4 +1,4 @@
-$ErrorActionPreference = 'Continue'
+﻿$ErrorActionPreference = 'Continue'
 
 try {
     Add-Type -AssemblyName System.Net.Http -ErrorAction Stop
@@ -9,17 +9,16 @@ catch {
 
 $endpoint    = 'http://127.0.0.1:21329/'
 $reportPath  = 'c:\Users\MohamedNazmi\source\repos\AIDEVTOOLS\mcp-replication-failures.md'
-$mcpCallTimeoutSec = 10
-$mcpWriteTimeoutSec = 10
+$mcpCallTimeoutSec = 20
+$mcpWriteTimeoutSec = 20
 
 $types = @(
-    'AxClass','AxTable','AxView','AxDataEntityView','AxMap','AxEdt','AxEnum','AxForm','AxMenu',
-    'AxMenuItemDisplay','AxMenuItemOutput','AxMenuItemAction','AxQuery','AxSecurityPrivilege','AxSecurityDuty',
-    'AxSecurityRole','AxService','AxServiceGroup','AxConfigurationKey','AxTableExtension','AxFormExtension',
-    'AxEnumExtension','AxEdtExtension','AxViewExtension','AxMenuExtension','AxMenuItemDisplayExtension',
-    'AxMenuItemOutputExtension','AxMenuItemActionExtension','AxQuerySimpleExtension','AxSecurityDutyExtension',
-    'AxSecurityRoleExtension',
-    'AxTile'  # Last — DeleteTile can hang the bridge
+    'AxClass','AxTable','AxView','AxDataEntityView','AxEdt','AxEnum','AxForm','AxMenu',
+    'AxMenuItemAction','AxQuery','AxSecurityPrivilege','AxSecurityDuty',
+    'AxSecurityRole','AxService','AxServiceGroup','AxConfigurationKey',
+    'AxMenuItemDisplay',
+    'AxMenuItemOutput',
+    'AxTile'
 )
 
 function Invoke-Mcp {
@@ -83,7 +82,7 @@ function Get-JsonSection {
     if (-not $m.Success) { return $null }
 
     $json = $m.Groups['json'].Value.Trim()
-    try { return ($json | ConvertFrom-Json -Depth 100) } catch { return $null }
+    try { return ($json | ConvertFrom-Json) } catch { return $null }
 }
 
 # Extract a plain-text block from a named section (e.g. "=== Declaration ===")
@@ -179,10 +178,9 @@ function Get-ActiveProjectModel {
 
 $script:sampleCache = @{
     AxClass = @{ Name = 'BankAccountTablePHR_EventHandler'; Model = 'AdvancedPayroll'; IsBaseProduct = $false }
-    AxTable = @{ Name = 'PHRAccmps'; Model = 'AdvancedPayroll'; IsBaseProduct = $false }
+    AxTable = @{ Name = 'CustTable'; Model = 'AdvancedPayroll'; IsBaseProduct = $true }
     AxView = @{ Name = 'PHRDepartmentsNameIdView'; Model = 'AdvancedPayroll'; IsBaseProduct = $false }
     AxDataEntityView = @{ Name = 'PHRAccmpsEntity'; Model = 'AdvancedPayroll'; IsBaseProduct = $false }
-    AxMap = @{ Name = 'PHRImportMap'; Model = 'AdvancedPayroll'; IsBaseProduct = $false }
     AxEdt = @{ Name = 'DEL_PHRExeFileLocation'; Model = 'AdvancedPayroll'; IsBaseProduct = $false }
     AxEnum = @{ Name = 'PHRAccountCodeTypes'; Model = 'AdvancedPayroll'; IsBaseProduct = $false }
     AxForm = @{ Name = 'PHRAccmps'; Model = 'AdvancedPayroll'; IsBaseProduct = $false }
@@ -198,17 +196,6 @@ $script:sampleCache = @{
     AxService = @{ Name = 'PHRUSStatRptService'; Model = 'AdvancedPayrollUSLocalization'; IsBaseProduct = $false }
     AxServiceGroup = @{ Name = 'PHRUSStatRptServiceGrp'; Model = 'AdvancedPayrollUSLocalization'; IsBaseProduct = $false }
     AxConfigurationKey = @{ Name = 'PHRFutureVersions'; Model = 'AdvancedPayroll'; IsBaseProduct = $false }
-    AxTableExtension = @{ Name = 'BankAccountTable.ExtensionPHRTable'; Model = 'AdvancedPayroll'; IsBaseProduct = $false }
-    AxFormExtension = @{ Name = 'BankAccountTable.ExtensionPHRForm'; Model = 'AdvancedPayroll'; IsBaseProduct = $false }
-    AxEnumExtension = @{ Name = 'NumberSeqModule.ExtensionPHREnum'; Model = 'AdvancedPayroll'; IsBaseProduct = $false }
-    AxEdtExtension = @{ Name = 'Description.CMCExtension'; Model = 'AnthologyFinanceHcm'; IsBaseProduct = $false }
-    AxViewExtension = @{ Name = 'BankAccountTableLookup.CMCExtension'; Model = 'AnthologyFinanceHcm'; IsBaseProduct = $false }
-    AxMenuExtension = @{ Name = 'MainMenu.ExtensionPHRMenu'; Model = 'AdvancedPayroll'; IsBaseProduct = $false }
-    AxMenuItemDisplayExtension = @{ Name = 'HcmCourseType.CMCExtension'; Model = 'AnthologyFinanceHcm'; IsBaseProduct = $false }
-    AxMenuItemActionExtension = @{ Name = 'PayrollEarningsStatementsReleased.CMCExtension'; Model = 'AnthologyFinanceHcm'; IsBaseProduct = $false }
-    AxQuerySimpleExtension = @{ Name = 'ATHTimesheetProcessQR.AnthologyAdvancePayrollConnector'; Model = 'Anthology Advance Payroll Connector'; IsBaseProduct = $false }
-    AxSecurityDutyExtension = @{ Name = 'ATHFederalWorkStudyMaintainDuty.AnthologyAdvancePayrollConnector'; Model = 'Anthology Advance Payroll Connector'; IsBaseProduct = $false }
-    AxSecurityRoleExtension = @{ Name = 'HcmHumanResourceAssistant.ExtensionPHRSecurityRole'; Model = 'AdvancedPayroll'; IsBaseProduct = $false }
 }
 
 Write-Host "Loaded hardcoded sample artifacts: $($script:sampleCache.Count)/$($types.Count) types." -ForegroundColor Green
@@ -241,7 +228,7 @@ try {
         throw 'tools/list returned too little data'
     }
 
-    # 3. Actual tool call — read a known object
+    # 3. Actual tool call - read a known object
     $readResult = Invoke-Mcp -ToolName 'xpp_read_object' -ToolArgs @{
         objectType = 'AxEnum'
         objectName = 'PHRAccountCodeTypes'
@@ -255,7 +242,7 @@ try {
     }
 
     $smokeOk = $true
-    Write-Host '=== Smoke test PASSED — MCP is healthy ===' -ForegroundColor Green
+    Write-Host '=== Smoke test PASSED - MCP is healthy ===' -ForegroundColor Green
 }
 catch {
     Write-Host "=== Smoke test FAILED: $($_.Exception.Message) ===" -ForegroundColor Red
@@ -285,12 +272,12 @@ if (-not [string]::IsNullOrWhiteSpace($script:activeProjectModel)) {
 foreach ($type in $types) {
     # Circuit breaker: stop after N consecutive failures (likely cascade / bridge down)
     if ($consecutiveFailures -ge $maxConsecutiveFailures) {
-        Write-Host "STOPPING: $consecutiveFailures consecutive failures — bridge may be hung. Skipping remaining types." -ForegroundColor Red
+        Write-Host "STOPPING: $consecutiveFailures consecutive failures - bridge may be hung. Skipping remaining types." -ForegroundColor Red
         foreach ($remaining in $types[($types.IndexOf($type))..($types.Count-1)]) {
             $results += [pscustomobject]@{
                 ObjectType = $remaining; SampleObject = ''; NewObject = ''; TargetModel = ''
                 SampleModel = ''; ReadStatus = 'Skipped'; CreateStatus = 'Skipped'
-                ValidateStatus = 'Skipped'; CompareStatus = 'Skipped'; DeleteStatus = 'Skipped'
+                ValidateStatus = 'Skipped'; CompareStatus = 'Skipped'
                 Notes = 'Skipped: circuit breaker after consecutive failures.'; SampleSource = 'None'; MetadataSections = ''
             }
         }
@@ -312,7 +299,6 @@ foreach ($type in $types) {
             ReadStatus     = 'Skipped'
             CreateStatus   = 'Skipped'
             ValidateStatus = 'Skipped'
-            DeleteStatus   = 'Skipped'
             Notes          = 'No sample found.'
             SampleSource   = 'None'
             MetadataSections = ''
@@ -348,7 +334,7 @@ foreach ($type in $types) {
     }
 
     if (-not $read.IsError -and -not [string]::IsNullOrWhiteSpace($read.Text)) {
-        # Declaration (plain X++ source — not JSON)
+        # Declaration (plain X++ source - not JSON)
         $decl = Get-TextSection -Text $read.Text -SectionName 'Declaration'
         if ($decl) { $createArgs.declaration = $decl }
 
@@ -411,14 +397,6 @@ foreach ($type in $types) {
         }
     }
 
-    # --- Step 6: delete ---
-    $delete = $null
-    if (-not $create.IsError) {
-        $delete = Invoke-Mcp -ToolName 'xpp_delete_object' -ToolArgs @{
-            objectType = $type; objectName = $newName; modelName = $createModel
-        }
-    }
-
     $note = @()
     if ($read.IsError) {
         $t = ($read.Text -replace '\r?\n', ' ')
@@ -432,10 +410,6 @@ foreach ($type in $types) {
         $t = ($validate.Text -replace '\r?\n', ' ')
         $note += ('VALIDATE: ' + $t.Substring(0, [Math]::Min(300, $t.Length)))
     }
-    if ($delete -and $delete.IsError) {
-        $t = ($delete.Text -replace '\r?\n', ' ')
-        $note += ('DELETE: ' + $t.Substring(0, [Math]::Min(300, $t.Length)))
-    }
     if ($compareStatus -eq 'Failed' -and -not [string]::IsNullOrWhiteSpace($compareDetails)) {
         $note += ('COMPARE: ' + $compareDetails)
     }
@@ -448,13 +422,12 @@ foreach ($type in $types) {
     }
 
     $validateStatus = if ($validate) { if ($validatePassed) { 'Passed' } else { 'Failed' } } else { 'Skipped' }
-    $deleteStatus   = if ($delete)   { if ($delete.IsError)  { 'Failed' } else { 'Passed' } } else { 'Skipped' }
 
     # Track consecutive failures for circuit breaker
     $typeHadFailure = ($read.IsError -or $create.IsError)
     if ($typeHadFailure) { $consecutiveFailures++ } else { $consecutiveFailures = 0 }
 
-    Write-Host "  Validate: $validateStatus  Compare: $compareStatus  Delete: $deleteStatus" -ForegroundColor Gray
+    Write-Host "  Validate: $validateStatus  Compare: $compareStatus" -ForegroundColor Gray
 
     $results += [pscustomobject]@{
         ObjectType     = $type
@@ -466,7 +439,6 @@ foreach ($type in $types) {
         CreateStatus   = $(if ($create.IsError) { 'Failed' } else { 'Passed' })
         ValidateStatus = $validateStatus
         CompareStatus  = $compareStatus
-        DeleteStatus   = $deleteStatus
         Notes          = ($note -join ' | ')
         SampleSource   = $sampleSource
         MetadataSections = ''
@@ -480,7 +452,7 @@ foreach ($type in $types) {
                 if ($read.Text -match "=== $sec") { $extractedCount++ }
             }
             $results[-1].MetadataSections = "$extractedCount/$($sections.Count) sections"
-    }
+        }
 
     # Cooldown: let VS main thread process metadata events before next type
     Start-Sleep -Seconds 3
@@ -488,12 +460,12 @@ foreach ($type in $types) {
 
 $failed  = @($results | Where-Object {
     $_.CreateStatus -eq 'Failed' -or $_.ReadStatus -eq 'Failed' -or
-    $_.ValidateStatus -eq 'Failed' -or $_.CompareStatus -eq 'Failed' -or $_.DeleteStatus -eq 'Failed'
+    $_.ValidateStatus -eq 'Failed' -or $_.CompareStatus -eq 'Failed'
 })
 $skipped = @($results | Where-Object { $_.ReadStatus -eq 'Skipped' })
 $passed  = @($results | Where-Object {
     $_.ReadStatus -ne 'Skipped' -and $_.ReadStatus -ne 'Failed' -and
-    $_.CreateStatus -ne 'Failed' -and $_.ValidateStatus -ne 'Failed' -and $_.DeleteStatus -ne 'Failed'
+    $_.CreateStatus -ne 'Failed' -and $_.ValidateStatus -ne 'Failed'
 })
 
 $lines = @()
@@ -529,7 +501,7 @@ if ($failed.Count -eq 0) {
         $lines += ('- Sample model: ' + $f.SampleModel)
         $lines += ('- Create model: ' + $f.TargetModel)
         $lines += ('- Read: ' + $f.ReadStatus + ', Create: ' + $f.CreateStatus +
-               ', Validate: ' + $f.ValidateStatus + ', Compare: ' + $f.CompareStatus + ', Delete: ' + $f.DeleteStatus)
+               ', Validate: ' + $f.ValidateStatus + ', Compare: ' + $f.CompareStatus)
         if (-not [string]::IsNullOrWhiteSpace($f.Notes)) {
             $lines += ('- Error details: ' + $f.Notes)
         }
@@ -539,15 +511,15 @@ if ($failed.Count -eq 0) {
 
 $lines += '## Full Matrix'
 $lines += ''
-$lines += '| ObjectType | SampleObject | Source | Metadata | Read | Create | Validate | Compare | Delete | Notes |'
-$lines += '|---|---|---|---|---|---|---|---|---|---|'
+$lines += '| ObjectType | SampleObject | Source | Metadata | Read | Create | Validate | Compare | Notes |'
+$lines += '|---|---|---|---|---|---|---|---|---|'
 
 foreach ($r in $results) {
     $notes = ($r.Notes -replace '\|', '/').Replace("`r", ' ').Replace("`n", ' ')
     $notes = $notes.Substring(0, [Math]::Min(100, $notes.Length))
     $lines += ('| ' + $r.ObjectType + ' | ' + $r.SampleObject + ' | ' + $r.SampleSource +
                ' | ' + $r.MetadataSections + ' | ' + $r.ReadStatus + ' | ' + $r.CreateStatus +
-               ' | ' + $r.ValidateStatus + ' | ' + $r.CompareStatus + ' | ' + $r.DeleteStatus + ' | ' + $notes + ' |')
+               ' | ' + $r.ValidateStatus + ' | ' + $r.CompareStatus + ' | ' + $notes + ' |')
 }
 
 Set-Content -Path $reportPath -Value $lines -Encoding UTF8

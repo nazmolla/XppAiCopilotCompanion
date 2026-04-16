@@ -10,7 +10,6 @@ namespace XppAiCopilotCompanion
         AxViewExtension,
         AxDataEntityView,
         AxCompositeDataEntityView,
-        AxMap,
         AxEdt,
         AxEdtExtension,
         AxEnum,

@@ -285,7 +285,6 @@ namespace XppAiCopilotCompanion.McpServer
             string idToken = JsonHelpers.ExtractJsonValueToken(json, "id");
             string method = JsonHelpers.ExtractJsonString(json, "method");
 
-            Console.Error.WriteLine("[" + ServerName + "] method=" + method + " id=" + idToken);
             McpLogger.Log("method=" + method + " id=" + idToken);
 
             switch (method)

@@ -43,12 +43,12 @@ Discovery and context:
 - xpp_find_object
 - xpp_list_objects
 - xpp_find_references
+- xpp_get_object_type_schema
 
 Metadata CRUD:
 - xpp_read_object
 - xpp_create_object
 - xpp_update_object
-- xpp_delete_object
 - xpp_validate_object
 
 Project and labels:
@@ -240,7 +240,6 @@ When tools are unavailable, Copilot should:
 
 ## Security and Safety
 
-- Treat delete operations as destructive and require explicit user intent.
 - Avoid exposing secrets or credentials in outputs.
 - Keep changes scoped to the requested task.
 

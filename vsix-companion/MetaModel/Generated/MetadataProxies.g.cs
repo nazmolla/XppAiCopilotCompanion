@@ -18,7 +18,6 @@ namespace XppAiCopilotCompanion.MetaModel.Generated
             "AxEnum",
             "AxView",
             "AxQuery",
-            "AxMap",
             "AxMenu",
             "AxTile",
             "AxMenuItemDisplay",
@@ -636,65 +635,6 @@ namespace XppAiCopilotCompanion.MetaModel.Generated
         public List<string> TypeParameters { get; set; }
         public string UnparsableSource { get; set; }
         public string Visibility { get; set; }
-    }
-
-    public sealed class AxMapBaseFieldProxy
-    {
-        public string AliasFor { get; set; }
-        public string AllowEdit { get; set; }
-        public string AllowEditOnCreate { get; set; }
-        public string ConfigurationKey { get; set; }
-        public string CountryRegionCodes { get; set; }
-        public string CountryRegionContextField { get; set; }
-        public string ExtendedDataType { get; set; }
-        public string GroupPrompt { get; set; }
-        public string HelpText { get; set; }
-        public string IgnoreEDTRelation { get; set; }
-        public string IsObsolete { get; set; }
-        public string Label { get; set; }
-        public string Mandatory { get; set; }
-        public string Name { get; set; }
-        public string SaveContents { get; set; }
-        public string Tags { get; set; }
-        public string Visible { get; set; }
-    }
-
-    public sealed class AxMapProxy
-    {
-        public List<AxAttributeProxy> Attributes { get; set; }
-        public SourceCodeProxy CompilerMetadata { get; set; }
-        public string ConfigurationKey { get; set; }
-        public List<AxConflictProxy> Conflicts { get; set; }
-        public string CountryRegionCodes { get; set; }
-        public string CountryRegionContextField { get; set; }
-        public string Declaration { get; set; }
-        public string DeveloperDocumentation { get; set; }
-        public string EntityRelationshipType { get; set; }
-        public List<AxTableFieldGroupProxy> FieldGroups { get; set; }
-        public List<AxMapBaseFieldProxy> Fields { get; set; }
-        public string FormRef { get; set; }
-        public string IsObsolete { get; set; }
-        public string Label { get; set; }
-        public string ListPageRef { get; set; }
-        public List<AxTableMappingProxy> Mappings { get; set; }
-        public List<AxMethodProxy> Methods { get; set; }
-        public string Name { get; set; }
-        public string OperationalDomain { get; set; }
-        public string PreviewPartRef { get; set; }
-        public string ReportRef { get; set; }
-        public string SingularLabel { get; set; }
-        public SourceCodeProxy SourceCode { get; set; }
-        public List<string> SubscriberAccessLevel { get; set; }
-        public string SystemTable { get; set; }
-        public string TableContents { get; set; }
-        public string TableGroup { get; set; }
-        public string Tags { get; set; }
-        public string TitleField1 { get; set; }
-        public string TitleField2 { get; set; }
-        public List<string> TypeParameters { get; set; }
-        public string UnparsableSource { get; set; }
-        public string Visibility { get; set; }
-        public string Visible { get; set; }
     }
 
     public sealed class AxMenuCustomizationElementProxy

@@ -73,6 +73,25 @@ namespace XppAiCopilotCompanion.MetaModel
 
         // ── Object CRUD ──
 
+        private static bool HasTypedUpdateSupport(string objectType)
+        {
+            switch (objectType)
+            {
+                case "AxClass":
+                case "AxTable":
+                case "AxForm":
+                case "AxEdt":
+                case "AxEnum":
+                case "AxView":
+                case "AxQuery":
+                case "AxDataEntityView":
+                case "AxMenu":
+                    return true;
+                default:
+                    return false;
+            }
+        }
+
         public MetaModelResult CreateObject(CreateObjectRequest request)
         {
             ThreadHelper.ThrowIfNotOnUIThread();
@@ -85,78 +104,52 @@ namespace XppAiCopilotCompanion.MetaModel
 
             try
             {
+                MetaModelResult result;
                 switch (request.ObjectType)
                 {
-                    case "AxClass":
-                        return CreateClass(request, saveInfo);
-                    case "AxTable":
-                        return CreateTable(request, saveInfo);
-                    case "AxForm":
-                        return CreateForm(request, saveInfo);
-                    case "AxEdt":
-                        return CreateEdt(request, saveInfo);
-                    case "AxEnum":
-                        return CreateEnum(request, saveInfo);
-                    case "AxMenuItemDisplay":
-                        return CreateMenuItemDisplay(request, saveInfo);
-                    case "AxMenuItemOutput":
-                        return CreateMenuItemOutput(request, saveInfo);
-                    case "AxMenuItemAction":
-                        return CreateMenuItemAction(request, saveInfo);
-                    case "AxQuery":
-                        return CreateQuery(request, saveInfo);
-                    case "AxView":
-                        return CreateView(request, saveInfo);
-                    case "AxDataEntityView":
-                        return CreateDataEntityView(request, saveInfo);
-                    case "AxSecurityPrivilege":
-                        return CreateSecurityPrivilege(request, saveInfo);
-                    case "AxSecurityDuty":
-                        return CreateSecurityDuty(request, saveInfo);
-                    case "AxSecurityRole":
-                        return CreateSecurityRole(request, saveInfo);
-                    case "AxService":
-                        return CreateService(request, saveInfo);
-                    case "AxServiceGroup":
-                        return CreateServiceGroup(request, saveInfo);
-                    case "AxMap":
-                        return CreateMap(request, saveInfo);
-                    case "AxMenu":
-                        return CreateMenu(request, saveInfo);
-                    case "AxTile":
-                        return CreateTile(request, saveInfo);
-                    case "AxConfigurationKey":
-                        return CreateConfigurationKey(request, saveInfo);
-
-                    // ── Extension types (no typed Create API — uses serialization to disk) ──
-                    case "AxTableExtension":
-                        return CreateExtensionObject(request, saveInfo, typeof(AxTableExtension), "AxTableExtension");
-                    case "AxFormExtension":
-                        return CreateExtensionObject(request, saveInfo, typeof(AxFormExtension), "AxFormExtension");
-                    case "AxEnumExtension":
-                        return CreateExtensionObject(request, saveInfo, typeof(AxEnumExtension), "AxEnumExtension");
-                    case "AxEdtExtension":
-                        return CreateExtensionObject(request, saveInfo, typeof(AxEdtExtension), "AxEdtExtension");
-                    case "AxViewExtension":
-                        return CreateExtensionObject(request, saveInfo, typeof(AxViewExtension), "AxViewExtension");
-                    case "AxMenuExtension":
-                        return CreateExtensionObject(request, saveInfo, typeof(AxMenuExtension), "AxMenuExtension");
-                    case "AxMenuItemDisplayExtension":
-                        return CreateExtensionObject(request, saveInfo, typeof(AxMenuItemDisplayExtension), "AxMenuItemDisplayExtension");
-                    case "AxMenuItemOutputExtension":
-                        return CreateExtensionObject(request, saveInfo, typeof(AxMenuItemOutputExtension), "AxMenuItemOutputExtension");
-                    case "AxMenuItemActionExtension":
-                        return CreateExtensionObject(request, saveInfo, typeof(AxMenuItemActionExtension), "AxMenuItemActionExtension");
-                    case "AxQuerySimpleExtension":
-                        return CreateExtensionObject(request, saveInfo, typeof(AxQuerySimpleExtension), "AxQuerySimpleExtension");
-                    case "AxSecurityDutyExtension":
-                        return CreateExtensionObject(request, saveInfo, typeof(AxSecurityDutyExtension), "AxSecurityDutyExtension");
-                    case "AxSecurityRoleExtension":
-                        return CreateExtensionObject(request, saveInfo, typeof(AxSecurityRoleExtension), "AxSecurityRoleExtension");
+                    case "AxClass":          result = CreateClass(request, saveInfo); break;
+                    case "AxTable":          result = CreateTable(request, saveInfo); break;
+                    case "AxForm":           result = CreateForm(request, saveInfo); break;
+                    case "AxEdt":            result = CreateEdt(request, saveInfo); break;
+                    case "AxEnum":           result = CreateEnum(request, saveInfo); break;
+                    case "AxMenuItemDisplay": result = CreateMenuItemDisplay(request, saveInfo); break;
+                    case "AxMenuItemOutput":  result = CreateMenuItemOutput(request, saveInfo); break;
+                    case "AxMenuItemAction":  result = CreateMenuItemAction(request, saveInfo); break;
+                    case "AxQuery":          result = CreateQuery(request, saveInfo); break;
+                    case "AxView":           result = CreateView(request, saveInfo); break;
+                    case "AxDataEntityView": result = CreateDataEntityView(request, saveInfo); break;
+                    case "AxSecurityPrivilege": result = CreateSecurityPrivilege(request, saveInfo); break;
+                    case "AxSecurityDuty":   result = CreateSecurityDuty(request, saveInfo); break;
+                    case "AxSecurityRole":   result = CreateSecurityRole(request, saveInfo); break;
+                    case "AxService":        result = CreateService(request, saveInfo); break;
+                    case "AxServiceGroup":   result = CreateServiceGroup(request, saveInfo); break;
+                    case "AxMenu":           result = CreateMenu(request, saveInfo); break;
+                    case "AxTile":           result = CreateTile(request, saveInfo); break;
+                    case "AxConfigurationKey": result = CreateConfigurationKey(request, saveInfo); break;
 
                     default:
-                        return Fail("Unsupported object type: " + request.ObjectType);
+                        result = Fail("Unsupported object type: " + request.ObjectType); break;
                 }
+
+                if (result.Success)
+                {
+                    // Force MetaModel refresh so the Update path can find the new object.
+                    _metaService = null;
+                    InvalidateCaches();
+
+                    // Apply all metadata through UpdateObject so Create and Update
+                    // share a single code path for declaration, methods, properties,
+                    // fields, indexes, relations, etc.
+                    if (HasTypedUpdateSupport(request.ObjectType))
+                    {
+                        var updateResult = UpdateObject(request.ToUpdateRequest());
+                        if (!updateResult.Success)
+                            return Fail("Created blank " + request.ObjectType + " '"
+                                + request.ObjectName + "' but metadata apply failed: "
+                                + updateResult.Message);
+                    }
+                }
+                return result;
             }
             catch (Exception ex)
             {
@@ -172,87 +165,44 @@ namespace XppAiCopilotCompanion.MetaModel
 
             try
             {
+                MetaModelResult result;
                 switch (request.ObjectType)
                 {
                     case "AxClass":
-                        return UpdateClass(request);
+                        result = UpdateClass(request); break;
                     case "AxTable":
-                        return UpdateTable(request);
+                        result = UpdateTable(request); break;
                     case "AxForm":
-                        return UpdateForm(request);
+                        result = UpdateForm(request); break;
                     case "AxEdt":
-                        return UpdateEdt(request);
+                        result = UpdateEdt(request); break;
                     case "AxEnum":
-                        return UpdateEnum(request);
+                        result = UpdateEnum(request); break;
+                    case "AxView":
+                        result = UpdateView(request); break;
+                    case "AxQuery":
+                        result = UpdateQuery(request); break;
+                    case "AxDataEntityView":
+                        result = UpdateDataEntityView(request); break;
+                    case "AxMenu":
+                        result = UpdateMenu(request); break;
                     default:
-                        return UpdateGenericByTypedApi(request);
+                        result = UpdateGenericByTypedApi(request); break;
                 }
+
+                // Force cache refresh so subsequent ReadObject returns updated metadata
+                // (MetaService.Update* writes to disk but may not hydrate child collections in cache)
+                if (result.Success)
+                {
+                    _metaService = null;
+                    InvalidateCaches();
+                }
+
+                return result;
             }
             catch (Exception ex)
             {
                 return Fail("Update failed: " + ex.Message);
-            }
-        }
-
-        public MetaModelResult DeleteObject(string objectType, string objectName, string modelName)
-        {
-            ThreadHelper.ThrowIfNotOnUIThread();
-            if (MetaService == null)
-                return Fail("MetaModel service not available.");
-
-            var saveInfo = GetModelSaveInfo(modelName);
-            if (saveInfo == null)
-                return Fail("Could not resolve model '" + modelName + "'.");
-
-            try
-            {
-                switch (objectType)
-                {
-                    case "AxClass": MetaService.DeleteClass(objectName, saveInfo); break;
-                    case "AxTable": MetaService.DeleteTable(objectName, saveInfo); break;
-                    case "AxForm": MetaService.DeleteForm(objectName, saveInfo); break;
-                    case "AxEdt": MetaService.DeleteExtendedDataType(objectName, saveInfo); break;
-                    case "AxEnum": MetaService.DeleteEnum(objectName, saveInfo); break;
-                    case "AxMenuItemDisplay": MetaService.DeleteMenuItemDisplay(objectName, saveInfo); break;
-                    case "AxMenuItemOutput": MetaService.DeleteMenuItemOutput(objectName, saveInfo); break;
-                    case "AxMenuItemAction": MetaService.DeleteMenuItemAction(objectName, saveInfo); break;
-                    case "AxQuery": MetaService.DeleteQuery(objectName, saveInfo); break;
-                    case "AxView": MetaService.DeleteView(objectName, saveInfo); break;
-                    case "AxDataEntityView": MetaService.DeleteDataEntityView(objectName, saveInfo); break;
-                    case "AxSecurityPrivilege": MetaService.DeleteSecurityPrivilege(objectName, saveInfo); break;
-                    case "AxSecurityDuty": MetaService.DeleteSecurityDuty(objectName, saveInfo); break;
-                    case "AxSecurityRole": MetaService.DeleteSecurityRole(objectName, saveInfo); break;
-                    case "AxService": MetaService.DeleteService(objectName, saveInfo); break;
-                    case "AxServiceGroup": MetaService.DeleteServiceGroup(objectName, saveInfo); break;
-                    case "AxMap": MetaService.DeleteMap(objectName, saveInfo); break;
-                    case "AxMenu": MetaService.DeleteMenu(objectName, saveInfo); break;
-                    case "AxTile": MetaService.DeleteTile(objectName, saveInfo); break;
-                    case "AxConfigurationKey": MetaService.DeleteConfigurationKey(objectName, saveInfo); break;
-
-                    // Extension types are file-backed in current implementation.
-                    case "AxTableExtension": DeleteExtensionObject(saveInfo, "AxTableExtension", objectName); break;
-                    case "AxFormExtension": DeleteExtensionObject(saveInfo, "AxFormExtension", objectName); break;
-                    case "AxEnumExtension": DeleteExtensionObject(saveInfo, "AxEnumExtension", objectName); break;
-                    case "AxEdtExtension": DeleteExtensionObject(saveInfo, "AxEdtExtension", objectName); break;
-                    case "AxViewExtension": DeleteExtensionObject(saveInfo, "AxViewExtension", objectName); break;
-                    case "AxMenuExtension": DeleteExtensionObject(saveInfo, "AxMenuExtension", objectName); break;
-                    case "AxMenuItemDisplayExtension": DeleteExtensionObject(saveInfo, "AxMenuItemDisplayExtension", objectName); break;
-                    case "AxMenuItemOutputExtension": DeleteExtensionObject(saveInfo, "AxMenuItemOutputExtension", objectName); break;
-                    case "AxMenuItemActionExtension": DeleteExtensionObject(saveInfo, "AxMenuItemActionExtension", objectName); break;
-                    case "AxQuerySimpleExtension": DeleteExtensionObject(saveInfo, "AxQuerySimpleExtension", objectName); break;
-                    case "AxSecurityDutyExtension": DeleteExtensionObject(saveInfo, "AxSecurityDutyExtension", objectName); break;
-                    case "AxSecurityRoleExtension": DeleteExtensionObject(saveInfo, "AxSecurityRoleExtension", objectName); break;
-                    default:
-                        return Fail("Unsupported delete for type: " + objectType);
-                }
-
-                InvalidateCaches();
-
-                return new MetaModelResult { Success = true, Message = "Deleted " + objectType + " '" + objectName + "'." };
-            }
-            catch (Exception ex)
-            {
-                return Fail("Delete failed: " + ex.Message);
             }
         }
 
@@ -421,18 +371,6 @@ namespace XppAiCopilotCompanion.MetaModel
                         result.ModelName = GetObjectModelName(objectType, objectName);
                         break;
 
-                    case "AxMap":
-                        var axmap = MetaService.GetMap(objectName);
-                        if (axmap == null) return new ReadObjectResult { Message = "Map '" + objectName + "' not found." };
-                        result.Declaration = axmap.Declaration;
-                        if (axmap.Methods != null)
-                            foreach (var m in axmap.Methods)
-                                result.Methods.Add(new MethodInfo { Name = m.Name, Source = m.Source });
-                        result.Properties = ExtractProperties(axmap);
-                        result.TypedMetadataJson = BuildTypedMetadataJson(objectType, axmap);
-                        result.ModelName = GetObjectModelName(objectType, objectName);
-                        break;
-
                     case "AxTile":
                         var axtile = MetaService.GetTile(objectName);
                         if (axtile == null) return new ReadObjectResult { Message = "Tile '" + objectName + "' not found." };
@@ -444,29 +382,6 @@ namespace XppAiCopilotCompanion.MetaModel
                         var cfgkey = MetaService.GetConfigurationKey(objectName);
                         if (cfgkey == null) return new ReadObjectResult { Message = "ConfigurationKey '" + objectName + "' not found." };
                         PopulateReadResultFromGenericObject(result, objectType, cfgkey);
-                        result.ModelName = GetObjectModelName(objectType, objectName);
-                        break;
-
-                    // ── Extension types (read via reflection-based Get) ──
-                    case "AxTableExtension":
-                    case "AxFormExtension":
-                    case "AxEnumExtension":
-                    case "AxEdtExtension":
-                    case "AxViewExtension":
-                    case "AxMenuExtension":
-                    case "AxMenuItemDisplayExtension":
-                    case "AxMenuItemOutputExtension":
-                    case "AxMenuItemActionExtension":
-                    case "AxQuerySimpleExtension":
-                    case "AxSecurityDutyExtension":
-                    case "AxSecurityRoleExtension":
-                        var extObj = TryGetExtensionObject(objectType, objectName);
-                        if (extObj == null)
-                            return new ReadObjectResult
-                            {
-                                Message = objectType.Substring(2) + " '" + objectName + "' not found."
-                            };
-                        PopulateReadResultFromGenericObject(result, objectType, extObj);
                         result.ModelName = GetObjectModelName(objectType, objectName);
                         break;
 
@@ -735,6 +650,13 @@ namespace XppAiCopilotCompanion.MetaModel
             var readResult = ReadObject(req.ObjectType, req.ObjectName);
             if (!readResult.Success)
             {
+                // Retry with refreshed MetaModel service — cache may be stale after Create
+                _metaService = null;
+                InvalidateCaches();
+                readResult = ReadObject(req.ObjectType, req.ObjectName);
+            }
+            if (!readResult.Success)
+            {
                 result.Message = "Object not found: " + (readResult.Message ?? "unknown error");
                 return result;
             }
@@ -798,76 +720,198 @@ namespace XppAiCopilotCompanion.MetaModel
 
             if (req.Fields != null)
             {
-                // Build HashSet for O(1) lookups instead of O(n) .Any() searches
-                var fieldNameSet = readResult.Fields != null
-                    ? new System.Collections.Generic.HashSet<string>(
-                        readResult.Fields.Select(x => x.Name ?? ""),
-                        StringComparer.OrdinalIgnoreCase)
-                    : new System.Collections.Generic.HashSet<string>(StringComparer.OrdinalIgnoreCase);
-                
+                var actualFieldMap = readResult.Fields != null
+                    ? readResult.Fields.Where(x => x.Name != null)
+                        .ToDictionary(x => x.Name, x => x, StringComparer.OrdinalIgnoreCase)
+                    : new Dictionary<string, FieldDto>(StringComparer.OrdinalIgnoreCase);
+
                 foreach (var f in req.Fields)
                 {
-                    if (!fieldNameSet.Contains(f.Name ?? ""))
+                    if (!actualFieldMap.TryGetValue(f.Name ?? "", out var actual))
+                    {
                         mismatches.Add("Field '" + f.Name + "': expected to exist, not found");
+                        continue;
+                    }
+                    if (!string.IsNullOrEmpty(f.FieldType) &&
+                        !string.Equals(f.FieldType, actual.FieldType, StringComparison.OrdinalIgnoreCase))
+                        mismatches.Add("Field '" + f.Name + "'.FieldType: expected '" + f.FieldType + "', actual '" + (actual.FieldType ?? "") + "'");
+                    if (!string.IsNullOrEmpty(f.ExtendedDataType) &&
+                        !string.Equals(f.ExtendedDataType, actual.ExtendedDataType, StringComparison.OrdinalIgnoreCase))
+                        mismatches.Add("Field '" + f.Name + "'.ExtendedDataType: expected '" + f.ExtendedDataType + "', actual '" + (actual.ExtendedDataType ?? "") + "'");
+                    if (!string.IsNullOrEmpty(f.EnumType) &&
+                        !string.Equals(f.EnumType, actual.EnumType, StringComparison.OrdinalIgnoreCase))
+                        mismatches.Add("Field '" + f.Name + "'.EnumType: expected '" + f.EnumType + "', actual '" + (actual.EnumType ?? "") + "'");
+                    if (!string.IsNullOrEmpty(f.Label) &&
+                        !string.Equals(f.Label, actual.Label, StringComparison.OrdinalIgnoreCase))
+                        mismatches.Add("Field '" + f.Name + "'.Label: expected '" + f.Label + "', actual '" + (actual.Label ?? "") + "'");
                 }
             }
 
             if (req.EnumValues != null)
             {
-                // Build HashSet for O(1) lookups instead of O(n) .Any() searches
-                var enumNameSet = readResult.EnumValues != null
-                    ? new System.Collections.Generic.HashSet<string>(
-                        readResult.EnumValues.Select(x => x.Name ?? ""),
-                        StringComparer.OrdinalIgnoreCase)
-                    : new System.Collections.Generic.HashSet<string>(StringComparer.OrdinalIgnoreCase);
-                
+                var actualEnumMap = readResult.EnumValues != null
+                    ? readResult.EnumValues.Where(x => x.Name != null)
+                        .ToDictionary(x => x.Name, x => x, StringComparer.OrdinalIgnoreCase)
+                    : new Dictionary<string, EnumValueDto>(StringComparer.OrdinalIgnoreCase);
+
                 foreach (var ev in req.EnumValues)
                 {
-                    if (!enumNameSet.Contains(ev.Name ?? ""))
+                    if (!actualEnumMap.TryGetValue(ev.Name ?? "", out var actual))
+                    {
                         mismatches.Add("EnumValue '" + ev.Name + "': expected to exist, not found");
+                        continue;
+                    }
+                    if (ev.Value != actual.Value)
+                        mismatches.Add("EnumValue '" + ev.Name + "'.Value: expected " + ev.Value + ", actual " + actual.Value);
+                    if (!string.IsNullOrEmpty(ev.Label) &&
+                        !string.Equals(ev.Label, actual.Label, StringComparison.OrdinalIgnoreCase))
+                        mismatches.Add("EnumValue '" + ev.Name + "'.Label: expected '" + ev.Label + "', actual '" + (actual.Label ?? "") + "'");
                 }
             }
 
             if (req.Indexes != null)
             {
-                // Build HashSet for O(1) lookups instead of O(n) .Any() searches
-                var indexNameSet = readResult.Indexes != null
-                    ? new System.Collections.Generic.HashSet<string>(
-                        readResult.Indexes.Select(x => x.Name ?? ""),
-                        StringComparer.OrdinalIgnoreCase)
-                    : new System.Collections.Generic.HashSet<string>(StringComparer.OrdinalIgnoreCase);
-                
+                var actualIndexMap = readResult.Indexes != null
+                    ? readResult.Indexes.Where(x => x.Name != null)
+                        .ToDictionary(x => x.Name, x => x, StringComparer.OrdinalIgnoreCase)
+                    : new Dictionary<string, IndexDto>(StringComparer.OrdinalIgnoreCase);
+
                 foreach (var idx in req.Indexes)
                 {
-                    if (!indexNameSet.Contains(idx.Name ?? ""))
+                    if (!actualIndexMap.TryGetValue(idx.Name ?? "", out var actual))
+                    {
                         mismatches.Add("Index '" + idx.Name + "': expected to exist, not found");
+                        continue;
+                    }
+                    if (idx.AllowDuplicates != actual.AllowDuplicates)
+                        mismatches.Add("Index '" + idx.Name + "'.AllowDuplicates: expected " + idx.AllowDuplicates + ", actual " + actual.AllowDuplicates);
+                    if (idx.Fields != null && idx.Fields.Count > 0)
+                    {
+                        var actualFields = actual.Fields ?? new List<string>();
+                        var expectedSet = new HashSet<string>(idx.Fields, StringComparer.OrdinalIgnoreCase);
+                        var actualSet = new HashSet<string>(actualFields, StringComparer.OrdinalIgnoreCase);
+                        foreach (var expField in idx.Fields)
+                        {
+                            if (!actualSet.Contains(expField))
+                                mismatches.Add("Index '" + idx.Name + "'.Fields: expected field '" + expField + "' not found");
+                        }
+                    }
                 }
             }
 
             if (req.Relations != null)
             {
-                // Build HashSet for O(1) lookups instead of O(n) .Any() searches
-                var relationNameSet = readResult.Relations != null
-                    ? new System.Collections.Generic.HashSet<string>(
-                        readResult.Relations.Select(x => x.Name ?? ""),
-                        StringComparer.OrdinalIgnoreCase)
-                    : new System.Collections.Generic.HashSet<string>(StringComparer.OrdinalIgnoreCase);
-                
+                var actualRelMap = readResult.Relations != null
+                    ? readResult.Relations.Where(x => x.Name != null)
+                        .ToDictionary(x => x.Name, x => x, StringComparer.OrdinalIgnoreCase)
+                    : new Dictionary<string, RelationDto>(StringComparer.OrdinalIgnoreCase);
+
                 foreach (var rel in req.Relations)
                 {
-                    if (!relationNameSet.Contains(rel.Name ?? ""))
+                    if (!actualRelMap.TryGetValue(rel.Name ?? "", out var actual))
+                    {
                         mismatches.Add("Relation '" + rel.Name + "': expected to exist, not found");
+                        continue;
+                    }
+                    if (!string.IsNullOrEmpty(rel.RelatedTable) &&
+                        !string.Equals(rel.RelatedTable, actual.RelatedTable, StringComparison.OrdinalIgnoreCase))
+                        mismatches.Add("Relation '" + rel.Name + "'.RelatedTable: expected '" + rel.RelatedTable + "', actual '" + (actual.RelatedTable ?? "") + "'");
+                    if (rel.Constraints != null && rel.Constraints.Count > 0)
+                    {
+                        var actualConstraints = actual.Constraints ?? new List<RelationConstraintDto>();
+                        foreach (var c in rel.Constraints)
+                        {
+                            bool found = actualConstraints.Any(ac =>
+                                string.Equals(ac.Field, c.Field, StringComparison.OrdinalIgnoreCase) &&
+                                string.Equals(ac.RelatedField, c.RelatedField, StringComparison.OrdinalIgnoreCase));
+                            if (!found)
+                                mismatches.Add("Relation '" + rel.Name + "'.Constraint: expected " + (c.Field ?? "") + " -> " + (c.RelatedField ?? "") + ", not found");
+                        }
+                    }
                 }
+            }
+
+            if (req.FieldGroups != null)
+            {
+                var actualFgMap = readResult.FieldGroups != null
+                    ? readResult.FieldGroups.Where(x => x.Name != null)
+                        .ToDictionary(x => x.Name, x => x, StringComparer.OrdinalIgnoreCase)
+                    : new Dictionary<string, FieldGroupDto>(StringComparer.OrdinalIgnoreCase);
+
+                foreach (var fg in req.FieldGroups)
+                {
+                    if (!actualFgMap.TryGetValue(fg.Name ?? "", out var actual))
+                    {
+                        mismatches.Add("FieldGroup '" + fg.Name + "': expected to exist, not found");
+                        continue;
+                    }
+                    if (!string.IsNullOrEmpty(fg.Label) &&
+                        !string.Equals(fg.Label, actual.Label, StringComparison.OrdinalIgnoreCase))
+                        mismatches.Add("FieldGroup '" + fg.Name + "'.Label: expected '" + fg.Label + "', actual '" + (actual.Label ?? "") + "'");
+                    if (fg.Fields != null && fg.Fields.Count > 0)
+                    {
+                        var actualFields = actual.Fields ?? new List<string>();
+                        var actualSet = new HashSet<string>(actualFields, StringComparer.OrdinalIgnoreCase);
+                        foreach (var expField in fg.Fields)
+                        {
+                            if (!actualSet.Contains(expField))
+                                mismatches.Add("FieldGroup '" + fg.Name + "'.Fields: expected field '" + expField + "' not found");
+                        }
+                    }
+                }
+            }
+
+            if (req.EntryPoints != null)
+            {
+                var actualEpMap = readResult.EntryPoints != null
+                    ? readResult.EntryPoints.Where(x => x.Name != null)
+                        .ToDictionary(x => x.Name, x => x, StringComparer.OrdinalIgnoreCase)
+                    : new Dictionary<string, EntryPointDto>(StringComparer.OrdinalIgnoreCase);
+
+                foreach (var ep in req.EntryPoints)
+                {
+                    if (!actualEpMap.TryGetValue(ep.Name ?? "", out var actual))
+                    {
+                        mismatches.Add("EntryPoint '" + ep.Name + "': expected to exist, not found");
+                        continue;
+                    }
+                    if (!string.IsNullOrEmpty(ep.ObjectType) &&
+                        !string.Equals(ep.ObjectType, actual.ObjectType, StringComparison.OrdinalIgnoreCase))
+                        mismatches.Add("EntryPoint '" + ep.Name + "'.ObjectType: expected '" + ep.ObjectType + "', actual '" + (actual.ObjectType ?? "") + "'");
+                    if (!string.IsNullOrEmpty(ep.ObjectName) &&
+                        !string.Equals(ep.ObjectName, actual.ObjectName, StringComparison.OrdinalIgnoreCase))
+                        mismatches.Add("EntryPoint '" + ep.Name + "'.ObjectName: expected '" + ep.ObjectName + "', actual '" + (actual.ObjectName ?? "") + "'");
+                    if (!string.IsNullOrEmpty(ep.Grant) &&
+                        !string.Equals(ep.Grant, actual.Grant, StringComparison.OrdinalIgnoreCase))
+                        mismatches.Add("EntryPoint '" + ep.Name + "'.Grant: expected '" + ep.Grant + "', actual '" + (actual.Grant ?? "") + "'");
+                }
+            }
+
+            if (req.DataSources != null)
+            {
+                ValidateDataSources(req.DataSources, readResult.DataSources, "", mismatches);
             }
 
             result.Mismatches = mismatches;
             result.Valid = result.InProject && mismatches.Count == 0;
             if (result.Valid)
+            {
                 result.Message = "Validation passed. Object exists in project and all specified metadata is present.";
+            }
             else if (!result.InProject && mismatches.Count == 0)
+            {
                 result.Message = "Object metadata is correct but it is NOT in the active project.";
+            }
             else
-                result.Message = "Validation failed: " + mismatches.Count + " mismatch(es). InProject=" + result.InProject + ".";
+            {
+                var msgBuilder = new System.Text.StringBuilder();
+                msgBuilder.Append("Validation failed (" + mismatches.Count + " mismatch(es), InProject=" + result.InProject + "):");
+                foreach (var m in mismatches)
+                {
+                    msgBuilder.Append("\n  - " + m);
+                }
+                result.Message = msgBuilder.ToString();
+            }
 
             return result;
         }
@@ -941,6 +985,58 @@ namespace XppAiCopilotCompanion.MetaModel
                 return list.ToArray();
             }
             return null;
+        }
+
+        private static void ValidateDataSources(List<QueryDataSourceDto> expected, List<QueryDataSourceDto> actual, string prefix, List<string> mismatches)
+        {
+            if (expected == null || expected.Count == 0) return;
+
+            var actualMap = actual != null
+                ? actual.Where(x => x.Name != null)
+                    .ToDictionary(x => x.Name, x => x, StringComparer.OrdinalIgnoreCase)
+                : new Dictionary<string, QueryDataSourceDto>(StringComparer.OrdinalIgnoreCase);
+
+            foreach (var ds in expected)
+            {
+                string dsPath = string.IsNullOrEmpty(prefix)
+                    ? "DataSource '" + ds.Name + "'"
+                    : prefix + ".DataSource '" + ds.Name + "'";
+
+                if (!actualMap.TryGetValue(ds.Name ?? "", out var act))
+                {
+                    mismatches.Add(dsPath + ": expected to exist, not found");
+                    continue;
+                }
+                if (!string.IsNullOrEmpty(ds.Table) &&
+                    !string.Equals(ds.Table, act.Table, StringComparison.OrdinalIgnoreCase))
+                    mismatches.Add(dsPath + ".Table: expected '" + ds.Table + "', actual '" + (act.Table ?? "") + "'");
+                if (!string.IsNullOrEmpty(ds.JoinMode) &&
+                    !string.Equals(ds.JoinMode, act.JoinMode, StringComparison.OrdinalIgnoreCase))
+                    mismatches.Add(dsPath + ".JoinMode: expected '" + ds.JoinMode + "', actual '" + (act.JoinMode ?? "") + "'");
+                if (!string.IsNullOrEmpty(ds.LinkType) &&
+                    !string.Equals(ds.LinkType, act.LinkType, StringComparison.OrdinalIgnoreCase))
+                    mismatches.Add(dsPath + ".LinkType: expected '" + ds.LinkType + "', actual '" + (act.LinkType ?? "") + "'");
+                if (ds.DynamicFields.HasValue && ds.DynamicFields != act.DynamicFields)
+                    mismatches.Add(dsPath + ".DynamicFields: expected " + ds.DynamicFields + ", actual " + act.DynamicFields);
+                if (ds.Relations.HasValue && ds.Relations != act.Relations)
+                    mismatches.Add(dsPath + ".Relations: expected " + ds.Relations + ", actual " + act.Relations);
+                if (ds.FirstOnly.HasValue && ds.FirstOnly != act.FirstOnly)
+                    mismatches.Add(dsPath + ".FirstOnly: expected " + ds.FirstOnly + ", actual " + act.FirstOnly);
+                if (ds.Ranges != null && ds.Ranges.Count > 0)
+                {
+                    var actualRanges = act.Ranges ?? new List<QueryRangeDto>();
+                    foreach (var r in ds.Ranges)
+                    {
+                        bool found = actualRanges.Any(ar =>
+                            string.Equals(ar.Field, r.Field, StringComparison.OrdinalIgnoreCase) &&
+                            string.Equals(ar.Value, r.Value, StringComparison.OrdinalIgnoreCase));
+                        if (!found)
+                            mismatches.Add(dsPath + ".Range: expected Field='" + (r.Field ?? "") + "' Value='" + (r.Value ?? "") + "', not found");
+                    }
+                }
+                if (ds.ChildDataSources != null && ds.ChildDataSources.Count > 0)
+                    ValidateDataSources(ds.ChildDataSources, act.ChildDataSources, dsPath, mismatches);
+            }
         }
 
         // ── Discovery ──
@@ -1273,7 +1369,6 @@ namespace XppAiCopilotCompanion.MetaModel
                 "AxEnum",
                 "AxView",
                 "AxQuery",
-                "AxMap",
                 "AxMenu",
                 "AxTile",
                 "AxMenuItemDisplay",
@@ -1285,19 +1380,7 @@ namespace XppAiCopilotCompanion.MetaModel
                 "AxSecurityRole",
                 "AxService",
                 "AxServiceGroup",
-                "AxConfigurationKey",
-                "AxTableExtension",
-                "AxFormExtension",
-                "AxEnumExtension",
-                "AxEdtExtension",
-                "AxViewExtension",
-                "AxMenuExtension",
-                "AxMenuItemDisplayExtension",
-                "AxMenuItemOutputExtension",
-                "AxMenuItemActionExtension",
-                "AxQuerySimpleExtension",
-                "AxSecurityDutyExtension",
-                "AxSecurityRoleExtension"
+                "AxConfigurationKey"
             };
         }
 
@@ -1595,82 +1678,35 @@ namespace XppAiCopilotCompanion.MetaModel
 
         private MetaModelResult CreateClass(CreateObjectRequest req, ModelSaveInfo saveInfo)
         {
-            var axClass = new AxClass { Name = req.ObjectName };
-            if (!string.IsNullOrEmpty(req.Declaration))
-                axClass.Declaration = PrepareSource(req.Declaration, req.FormatCode);
-            else
-                axClass.Declaration = "class " + req.ObjectName + "\n{\n}";
-
-            AddMethods(axClass.Methods, req.Methods, req.FormatCode);
-            MetaService.CreateClass(axClass, saveInfo);
+            MetaService.CreateClass(new AxClass
+            {
+                Name = req.ObjectName,
+                Declaration = "class " + req.ObjectName + "\n{\n}"
+            }, saveInfo);
             return Ok("Created AxClass '" + req.ObjectName + "'.");
         }
 
         private MetaModelResult CreateTable(CreateObjectRequest req, ModelSaveInfo saveInfo)
         {
-            var axTable = new AxTable { Name = req.ObjectName };
-            if (!string.IsNullOrEmpty(req.Declaration))
-                axTable.Declaration = PrepareSource(req.Declaration, req.FormatCode);
-
-            AddMethods(axTable.Methods, req.Methods, req.FormatCode);
-            try
-            {
-                ApplyTypedMetadata(axTable, req);
-            }
-            catch (Exception ex)
-            {
-                return Fail("ApplyTypedMetadata failed for AxTable '" + req.ObjectName + "': " + ex.Message);
-            }
-            MetaService.CreateTable(axTable, saveInfo);
+            MetaService.CreateTable(new AxTable { Name = req.ObjectName }, saveInfo);
             return Ok("Created AxTable '" + req.ObjectName + "'.");
         }
 
         private MetaModelResult CreateForm(CreateObjectRequest req, ModelSaveInfo saveInfo)
         {
-            var axForm = new AxForm { Name = req.ObjectName };
-            if (!string.IsNullOrEmpty(req.Declaration))
-                axForm.SourceCode.Declaration = PrepareSource(req.Declaration, req.FormatCode);
-
-            AddMethods(axForm.Methods, req.Methods, req.FormatCode);
-            try
-            {
-                ApplyTypedMetadata(axForm, req);
-            }
-            catch (Exception ex)
-            {
-                return Fail("ApplyTypedMetadata failed for AxForm '" + req.ObjectName + "': " + ex.Message);
-            }
-            MetaService.CreateForm(axForm, saveInfo);
+            MetaService.CreateForm(new AxForm { Name = req.ObjectName }, saveInfo);
             return Ok("Created AxForm '" + req.ObjectName + "'.");
         }
 
         private MetaModelResult CreateEdt(CreateObjectRequest req, ModelSaveInfo saveInfo)
         {
-            var axEdt = new AxEdtString { Name = req.ObjectName };
-            try
-            {
-                ApplyTypedMetadata(axEdt, req);
-            }
-            catch (Exception ex)
-            {
-                return Fail("ApplyTypedMetadata failed for AxEdt '" + req.ObjectName + "': " + ex.Message);
-            }
-            MetaService.CreateExtendedDataType(axEdt, saveInfo);
+            MetaService.CreateExtendedDataType(new AxEdtString { Name = req.ObjectName }, saveInfo);
             return Ok("Created AxEdt '" + req.ObjectName + "'.");
         }
 
         private MetaModelResult CreateEnum(CreateObjectRequest req, ModelSaveInfo saveInfo)
         {
-            var axEnum = new AxEnum { Name = req.ObjectName };
-            try
-            {
-                ApplyTypedMetadata(axEnum, req);
-            }
-            catch (Exception ex)
-            {
-                return Fail("ApplyTypedMetadata failed for AxEnum '" + req.ObjectName + "': " + ex.Message);
-            }
-            MetaService.CreateEnum(axEnum, saveInfo);
+            MetaService.CreateEnum(new AxEnum { Name = req.ObjectName }, saveInfo);
             return Ok("Created AxEnum '" + req.ObjectName + "'.");
         }
 
@@ -1700,30 +1736,20 @@ namespace XppAiCopilotCompanion.MetaModel
 
         private MetaModelResult CreateQuery(CreateObjectRequest req, ModelSaveInfo saveInfo)
         {
-            var axQuery = new AxQuerySimple { Name = req.ObjectName };
-            ApplyTypedMetadata(axQuery, req);
-            MetaService.CreateQuery(axQuery, saveInfo);
+            MetaService.CreateQuery(new AxQuerySimple { Name = req.ObjectName }, saveInfo);
             return Ok("Created AxQuery '" + req.ObjectName + "'.");
         }
 
         private MetaModelResult CreateView(CreateObjectRequest req, ModelSaveInfo saveInfo)
         {
-            var axView = new AxView { Name = req.ObjectName };
-            if (!string.IsNullOrEmpty(req.Declaration))
-                axView.Declaration = PrepareSource(req.Declaration, req.FormatCode);
-            AddMethods(axView.Methods, req.Methods, req.FormatCode);
-            ApplyTypedMetadata(axView, req);
-            MetaService.CreateView(axView, saveInfo);
+            MetaService.CreateView(new AxView { Name = req.ObjectName }, saveInfo);
             return Ok("Created AxView '" + req.ObjectName + "'.");
         }
 
         private MetaModelResult CreateDataEntityView(CreateObjectRequest req, ModelSaveInfo saveInfo)
         {
-            var entity = new AxDataEntityView { Name = req.ObjectName };
-            if (!string.IsNullOrEmpty(req.Declaration))
-                entity.Declaration = PrepareSource(req.Declaration, req.FormatCode);
-            ApplyTypedMetadata(entity, req);
-            MetaService.UpdateDataEntityView(entity, saveInfo);
+            // DataEntityView has no Create API; UpdateDataEntityView creates-or-updates.
+            MetaService.UpdateDataEntityView(new AxDataEntityView { Name = req.ObjectName }, saveInfo);
             return Ok("Created AxDataEntityView '" + req.ObjectName + "'.");
         }
 
@@ -1767,22 +1793,9 @@ namespace XppAiCopilotCompanion.MetaModel
             return Ok("Created AxServiceGroup '" + req.ObjectName + "'.");
         }
 
-        private MetaModelResult CreateMap(CreateObjectRequest req, ModelSaveInfo saveInfo)
-        {
-            var map = new AxMap { Name = req.ObjectName };
-            if (!string.IsNullOrEmpty(req.Declaration))
-                map.Declaration = PrepareSource(req.Declaration, req.FormatCode);
-            AddMethods(map.Methods, req.Methods, req.FormatCode);
-            ApplyTypedMetadata(map, req);
-            MetaService.CreateMap(map, saveInfo);
-            return Ok("Created AxMap '" + req.ObjectName + "'.");
-        }
-
         private MetaModelResult CreateMenu(CreateObjectRequest req, ModelSaveInfo saveInfo)
         {
-            var menu = new AxMenu { Name = req.ObjectName };
-            ApplyTypedMetadata(menu, req);
-            MetaService.CreateMenu(menu, saveInfo);
+            MetaService.CreateMenu(new AxMenu { Name = req.ObjectName }, saveInfo);
             return Ok("Created AxMenu '" + req.ObjectName + "'.");
         }
 
@@ -1802,110 +1815,6 @@ namespace XppAiCopilotCompanion.MetaModel
             return Ok("Created AxConfigurationKey '" + req.ObjectName + "'.");
         }
 
-        /// <summary>
-        /// Creates an extension object by serializing and writing to the
-        /// model's metadata folder. The IMetaModelService has no Create/Update methods
-        /// for extension types, so this mirrors how the D365FO VS tools create extensions.
-        /// </summary>
-        private MetaModelResult CreateExtensionObject(CreateObjectRequest req, ModelSaveInfo saveInfo,
-            Type extensionType, string folderName)
-        {
-            try
-            {
-                var extObj = Activator.CreateInstance(extensionType);
-                extensionType.GetProperty("Name")?.SetValue(extObj, req.ObjectName);
-
-                // Apply typed metadata (properties, enum values, fields, etc.)
-                ApplyTypedMetadata(extObj, req);
-
-                // Use typed MetaModel save APIs only — no file fallback.
-                if (TrySaveExtensionViaMetaService(extensionType, extObj, saveInfo))
-                {
-                    return new MetaModelResult
-                    {
-                        Success = true,
-                        Message = "Created " + req.ObjectType + " '" + req.ObjectName + "'."
-                    };
-                }
-
-                return Fail("No IMetaModelService Create/Update API available for " + req.ObjectType
-                    + ". File-based creation is disabled.");
-            }
-            catch (Exception ex)
-            {
-                return Fail("Extension create failed: " + ex.Message);
-            }
-        }
-
-        private bool TrySaveExtensionViaMetaService(Type extensionType, object extensionObject, ModelSaveInfo saveInfo)
-        {
-            if (extensionType == null || extensionObject == null || saveInfo == null)
-                return false;
-
-            string typeName = extensionType.Name; // e.g. "AxTableExtension"
-            // IMetaModelService methods use names without "Ax" prefix (e.g., "CreateTableExtension")
-            string strippedName = typeName.StartsWith("Ax", StringComparison.Ordinal) ? typeName.Substring(2) : typeName;
-            var methodCandidates = new[]
-            {
-                "Create" + strippedName,
-                "Update" + strippedName,
-                "Create" + typeName,
-                "Update" + typeName
-            };
-
-            foreach (string methodName in methodCandidates)
-            {
-                var method = MetaService.GetType().GetMethod(methodName, new[] { extensionType, typeof(ModelSaveInfo) });
-                if (method == null) continue;
-
-                try
-                {
-                    method.Invoke(MetaService, new[] { extensionObject, saveInfo });
-                    InvalidateCaches();
-                    return true;
-                }
-                catch
-                {
-                    // Try next candidate.
-                }
-            }
-
-            return false;
-        }
-
-        /// <summary>
-        /// Reads an extension object from IMetaModelService using reflection.
-        /// Tries Get methods with and without "Ax" prefix.
-        /// </summary>
-        private object TryGetExtensionObject(string objectType, string objectName)
-        {
-            string strippedName = objectType.StartsWith("Ax", StringComparison.Ordinal) ? objectType.Substring(2) : objectType;
-            var methodCandidates = new[]
-            {
-                "Get" + strippedName,
-                "Get" + objectType
-            };
-
-            foreach (string methodName in methodCandidates)
-            {
-                var method = MetaService.GetType().GetMethod(methodName, new[] { typeof(string) });
-                if (method == null) continue;
-
-                try
-                {
-                    object result = method.Invoke(MetaService, new object[] { objectName });
-                    if (result != null) return result;
-                }
-                catch
-                {
-                    // Try next candidate.
-                }
-            }
-
-            return null;
-        }
-
-
         // ── Private helpers: Update operations ──
 
         private MetaModelResult UpdateClass(UpdateObjectRequest req)
@@ -1921,6 +1830,7 @@ namespace XppAiCopilotCompanion.MetaModel
                 cls.Declaration = PrepareSource(req.Declaration, req.FormatCode);
 
             UpdateMethods(cls.Methods, req.Methods, req.RemoveMethodNames, req.FormatCode);
+            ApplyTypedMetadata(cls, req);
             MetaService.UpdateClass(cls, saveInfo);
             return Ok("Updated AxClass '" + req.ObjectName + "'.");
         }
@@ -1963,6 +1873,7 @@ namespace XppAiCopilotCompanion.MetaModel
                 frm.SourceCode.Declaration = PrepareSource(req.Declaration, req.FormatCode);
 
             UpdateMethods(frm.Methods, req.Methods, req.RemoveMethodNames, req.FormatCode);
+            ApplyTypedMetadata(frm, req);
             MetaService.UpdateForm(frm, saveInfo);
             return Ok("Updated AxForm '" + req.ObjectName + "'.");
         }
@@ -1995,10 +1906,73 @@ namespace XppAiCopilotCompanion.MetaModel
             return Ok("Updated AxEnum '" + req.ObjectName + "'.");
         }
 
+        private MetaModelResult UpdateView(UpdateObjectRequest req)
+        {
+            var view = MetaService.GetView(req.ObjectName);
+            if (view == null)
+                return Fail("View '" + req.ObjectName + "' not found.");
+
+            var saveInfo = GetModelSaveInfoForObject("AxView", req.ObjectName);
+            if (saveInfo == null) return Fail("Cannot resolve model for '" + req.ObjectName + "'.");
+
+            if (!string.IsNullOrEmpty(req.Declaration))
+                view.Declaration = PrepareSource(req.Declaration, req.FormatCode);
+
+            UpdateMethods(view.Methods, req.Methods, req.RemoveMethodNames, req.FormatCode);
+            ApplyTypedMetadata(view, req);
+            MetaService.UpdateView(view, saveInfo);
+            return Ok("Updated AxView '" + req.ObjectName + "'.");
+        }
+
+        private MetaModelResult UpdateQuery(UpdateObjectRequest req)
+        {
+            var qry = MetaService.GetQuery(req.ObjectName);
+            if (qry == null)
+                return Fail("Query '" + req.ObjectName + "' not found.");
+
+            var saveInfo = GetModelSaveInfoForObject("AxQuery", req.ObjectName);
+            if (saveInfo == null) return Fail("Cannot resolve model for '" + req.ObjectName + "'.");
+
+            ApplyTypedMetadata(qry, req);
+            MetaService.UpdateQuery(qry, saveInfo);
+            return Ok("Updated AxQuery '" + req.ObjectName + "'.");
+        }
+
+        private MetaModelResult UpdateDataEntityView(UpdateObjectRequest req)
+        {
+            var entity = MetaService.GetDataEntityView(req.ObjectName);
+            if (entity == null)
+                return Fail("DataEntityView '" + req.ObjectName + "' not found.");
+
+            var saveInfo = GetModelSaveInfoForObject("AxDataEntityView", req.ObjectName);
+            if (saveInfo == null) return Fail("Cannot resolve model for '" + req.ObjectName + "'.");
+
+            if (!string.IsNullOrEmpty(req.Declaration))
+                entity.Declaration = PrepareSource(req.Declaration, req.FormatCode);
+
+            ApplyTypedMetadata(entity, req);
+            MetaService.UpdateDataEntityView(entity, saveInfo);
+            return Ok("Updated AxDataEntityView '" + req.ObjectName + "'.");
+        }
+
+        private MetaModelResult UpdateMenu(UpdateObjectRequest req)
+        {
+            var menu = MetaService.GetMenu(req.ObjectName);
+            if (menu == null)
+                return Fail("Menu '" + req.ObjectName + "' not found.");
+
+            var saveInfo = GetModelSaveInfoForObject("AxMenu", req.ObjectName);
+            if (saveInfo == null) return Fail("Cannot resolve model for '" + req.ObjectName + "'.");
+
+            ApplyTypedMetadata(menu, req);
+            MetaService.UpdateMenu(menu, saveInfo);
+            return Ok("Updated AxMenu '" + req.ObjectName + "'.");
+        }
+
         private MetaModelResult UpdateGenericByTypedApi(UpdateObjectRequest req)
         {
             return Fail("Update for type '" + req.ObjectType + "' is not yet supported via the typed API. "
-                + "Supported types: AxClass, AxTable, AxForm, AxEdt, AxEnum.");
+                + "Supported types: AxClass, AxTable, AxForm, AxEdt, AxEnum, AxView, AxQuery, AxDataEntityView, AxMenu.");
         }
 
         // ── Utility methods ──
@@ -2220,38 +2194,6 @@ namespace XppAiCopilotCompanion.MetaModel
             return null;
         }
 
-        private void DeleteExtensionObject(ModelSaveInfo saveInfo, string folderName, string objectName)
-        {
-            // IMetaModelService methods use names without "Ax" prefix (e.g., "DeleteTableExtension")
-            string strippedName = folderName.StartsWith("Ax", StringComparison.Ordinal) ? folderName.Substring(2) : folderName;
-            var methodCandidates = new[]
-            {
-                "Delete" + strippedName,
-                "Delete" + folderName
-            };
-
-            foreach (string methodName in methodCandidates)
-            {
-                var method = MetaService.GetType().GetMethod(methodName, new[] { typeof(string), typeof(ModelSaveInfo) });
-                if (method == null) continue;
-
-                try
-                {
-                    method.Invoke(MetaService, new object[] { objectName, saveInfo });
-                    InvalidateCaches();
-                    return;
-                }
-                catch
-                {
-                    // Try next candidate.
-                }
-            }
-
-            throw new InvalidOperationException(
-                "No IMetaModelService Delete API available for extension type '" + folderName
-                + "'. File-based deletion is disabled.");
-        }
-
         private static Type ResolveMetadataType(string objectType)
         {
             switch (objectType)
@@ -2263,7 +2205,6 @@ namespace XppAiCopilotCompanion.MetaModel
                 case "AxEnum": return typeof(AxEnum);
                 case "AxView": return typeof(AxView);
                 case "AxQuery": return typeof(AxQuerySimple);
-                case "AxMap": return typeof(AxMap);
                 case "AxMenu": return typeof(AxMenu);
                 case "AxTile": return typeof(AxTile);
                 case "AxMenuItemDisplay": return typeof(AxMenuItemDisplay);
@@ -2276,20 +2217,6 @@ namespace XppAiCopilotCompanion.MetaModel
                 case "AxService": return typeof(AxService);
                 case "AxServiceGroup": return typeof(AxServiceGroup);
                 case "AxConfigurationKey": return typeof(AxConfigurationKey);
-
-                // Extension types
-                case "AxTableExtension": return typeof(AxTableExtension);
-                case "AxFormExtension": return typeof(AxFormExtension);
-                case "AxEnumExtension": return typeof(AxEnumExtension);
-                case "AxEdtExtension": return typeof(AxEdtExtension);
-                case "AxViewExtension": return typeof(AxViewExtension);
-                case "AxMenuExtension": return typeof(AxMenuExtension);
-                case "AxMenuItemDisplayExtension": return typeof(AxMenuItemDisplayExtension);
-                case "AxMenuItemOutputExtension": return typeof(AxMenuItemOutputExtension);
-                case "AxMenuItemActionExtension": return typeof(AxMenuItemActionExtension);
-                case "AxQuerySimpleExtension": return typeof(AxQuerySimpleExtension);
-                case "AxSecurityDutyExtension": return typeof(AxSecurityDutyExtension);
-                case "AxSecurityRoleExtension": return typeof(AxSecurityRoleExtension);
 
                 default: return null;
             }
@@ -2478,6 +2405,8 @@ namespace XppAiCopilotCompanion.MetaModel
                                 axEp.ObjectType = (EntryPointType)Enum.Parse(typeof(EntryPointType), ep.ObjectType, true);
                         }
                         catch { }
+                        if (!string.IsNullOrEmpty(ep.Grant))
+                            TrySetPropertyValue(axEp, ep.Grant, "Grant");
                         addMethod.Invoke(collection, new object[] { axEp });
                     }
                 }
@@ -2519,7 +2448,8 @@ namespace XppAiCopilotCompanion.MetaModel
                 return;
             }
 
-            ApplyProperties(target, req.Properties);
+            // Apply structural changes FIRST so reference properties (ClusterIndex,
+            // PrimaryIndex, etc.) find their targets when set in the properties pass.
             if (target is AxEnum axEnum)
                 ApplyEnumValues(axEnum, req.EnumValues);
             if (target is AxTable axTable)
@@ -2532,6 +2462,9 @@ namespace XppAiCopilotCompanion.MetaModel
             if (target is AxQuerySimple axQuery)
                 ApplyQueryDataSources(axQuery, req.DataSources);
             ApplyEntryPoints(target, req.EntryPoints);
+
+            // Scalar properties last - references to fields/indexes/etc. are now valid.
+            ApplyProperties(target, req.Properties);
         }
 
         private static void ApplyTypedMetadataGraph(object target, string objectType, string typedMetadataJson)
@@ -3611,7 +3544,7 @@ namespace XppAiCopilotCompanion.MetaModel
                 if (targetPath == null)
                 {
                     result.Message = "Unsupported object type for cross-reference search: '" + objectType + "'. " +
-                        "Supported: AxClass, AxTable, AxForm, AxEnum, AxView, AxQuery, AxEdt, AxDataEntityView, AxMap.";
+                        "Supported: AxClass, AxTable, AxForm, AxEnum, AxView, AxQuery, AxEdt, AxDataEntityView.";
                     return result;
                 }
 
@@ -3659,7 +3592,6 @@ namespace XppAiCopilotCompanion.MetaModel
                 case "AxMenuItemOutput": return "MenuItemOutputs";
                 case "AxMenuItemAction": return "MenuItemActions";
                 case "AxDataEntityView": return "DataEntityViews";
-                case "AxMap": return "Maps";
                 case "AxService": return "Services";
                 case "AxServiceGroup": return "ServiceGroups";
                 case "AxSecurityRole": return "SecurityRoles";
@@ -3684,7 +3616,6 @@ namespace XppAiCopilotCompanion.MetaModel
                 case "MenuItemOutputs": return "AxMenuItemOutput";
                 case "MenuItemActions": return "AxMenuItemAction";
                 case "DataEntityViews": return "AxDataEntityView";
-                case "Maps": return "AxMap";
                 default: return folder;
             }
         }

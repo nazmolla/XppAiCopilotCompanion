@@ -57,7 +57,6 @@ namespace XppAiCopilotCompanion
                 case XppObjectType.AxTable: return "AxTable";
                 case XppObjectType.AxView: return "AxView";
                 case XppObjectType.AxDataEntityView: return "AxDataEntityView";
-                case XppObjectType.AxMap: return "AxMap";
                 case XppObjectType.AxEdt: return "AxEdt";
                 case XppObjectType.AxEnum: return "AxEnum";
                 case XppObjectType.AxForm: return "AxForm";

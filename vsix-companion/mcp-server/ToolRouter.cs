@@ -32,15 +32,15 @@ namespace XppAiCopilotCompanion.McpServer
           ""objectType"": {
             ""type"": ""string"",
             ""description"": ""The D365FO object type to create."",
-            ""enum"": [""AxClass"", ""AxTable"", ""AxView"", ""AxDataEntityView"", ""AxMap"", ""AxEdt"", ""AxEnum"", ""AxForm"", ""AxTile"", ""AxMenu"", ""AxMenuItemDisplay"", ""AxMenuItemOutput"", ""AxMenuItemAction"", ""AxQuery"", ""AxSecurityPrivilege"", ""AxSecurityDuty"", ""AxSecurityRole"", ""AxService"", ""AxServiceGroup"", ""AxConfigurationKey"", ""AxTableExtension"", ""AxFormExtension"", ""AxEnumExtension"", ""AxEdtExtension"", ""AxViewExtension"", ""AxMenuExtension"", ""AxMenuItemDisplayExtension"", ""AxMenuItemOutputExtension"", ""AxMenuItemActionExtension"", ""AxQuerySimpleExtension"", ""AxSecurityDutyExtension"", ""AxSecurityRoleExtension""]
+            ""enum"": [""AxClass"", ""AxTable"", ""AxView"", ""AxDataEntityView"", ""AxEdt"", ""AxEnum"", ""AxForm"", ""AxTile"", ""AxMenu"", ""AxMenuItemDisplay"", ""AxMenuItemOutput"", ""AxMenuItemAction"", ""AxQuery"", ""AxSecurityPrivilege"", ""AxSecurityDuty"", ""AxSecurityRole"", ""AxService"", ""AxServiceGroup"", ""AxConfigurationKey""]
           },
           ""objectName"": { ""type"": ""string"", ""description"": ""Name of the object. Must follow the model's naming prefix convention."" },
           ""typedMetadata"": { ""type"": ""object"", ""description"": ""Full strongly-typed metadata graph for the target object type. Preferred for complete metadata writes across all object types."" },
           ""declaration"": { ""type"": ""string"", ""description"": ""Raw X++ class/table declaration code block. Plain code only — NO XML, NO CDATA wrappers."" },
           ""methods"": { ""type"": ""array"", ""items"": { ""type"": ""string"" }, ""description"": ""Array of complete X++ method source strings. Plain code only — NO XML, NO CDATA wrappers. Any XML content will be rejected with an error."" },
           ""properties"": { ""type"": ""object"", ""description"": ""Key-value pairs for scalar metadata properties set via reflection. Keys are property names (e.g. Label, IsExtensible, TableGroup, ObjectType, Object, FormRef). Values are strings — type coercion is automatic (bool, int, enum). Use xpp_read_object on an existing object to discover available property names."" },
-          ""enumValues"": { ""type"": ""array"", ""items"": { ""type"": ""object"", ""properties"": { ""name"": { ""type"": ""string"" }, ""value"": { ""type"": ""integer"" }, ""label"": { ""type"": ""string"" } }, ""required"": [""name"", ""value""] }, ""description"": ""Enum values for AxEnum or AxEnumExtension. Each entry creates an AxEnumValue with Name, Value (integer), and optional Label."" },
-          ""fields"": { ""type"": ""array"", ""items"": { ""type"": ""object"", ""properties"": { ""name"": { ""type"": ""string"" }, ""fieldType"": { ""type"": ""string"", ""enum"": [""String"", ""Int"", ""Real"", ""Date"", ""DateTime"", ""Enum"", ""Int64"", ""Container"", ""Guid"", ""Time""] }, ""extendedDataType"": { ""type"": ""string"" }, ""enumType"": { ""type"": ""string"" }, ""label"": { ""type"": ""string"" } }, ""required"": [""name"", ""fieldType""] }, ""description"": ""Table fields for AxTable or AxTableExtension. fieldType determines the field class (AxTableFieldString, AxTableFieldInt, etc.)."" },
+          ""enumValues"": { ""type"": ""array"", ""items"": { ""type"": ""object"", ""properties"": { ""name"": { ""type"": ""string"" }, ""value"": { ""type"": ""integer"" }, ""label"": { ""type"": ""string"" } }, ""required"": [""name"", ""value""] }, ""description"": ""Enum values for AxEnum. Each entry creates an AxEnumValue with Name, Value (integer), and optional Label."" },
+          ""fields"": { ""type"": ""array"", ""items"": { ""type"": ""object"", ""properties"": { ""name"": { ""type"": ""string"" }, ""fieldType"": { ""type"": ""string"", ""enum"": [""String"", ""Int"", ""Real"", ""Date"", ""DateTime"", ""Enum"", ""Int64"", ""Container"", ""Guid"", ""Time""] }, ""extendedDataType"": { ""type"": ""string"" }, ""enumType"": { ""type"": ""string"" }, ""label"": { ""type"": ""string"" } }, ""required"": [""name"", ""fieldType""] }, ""description"": ""Table fields for AxTable. fieldType determines the field class (AxTableFieldString, AxTableFieldInt, etc.)."" },
           ""indexes"": { ""type"": ""array"", ""items"": { ""type"": ""object"", ""properties"": { ""name"": { ""type"": ""string"" }, ""allowDuplicates"": { ""type"": ""boolean"" }, ""fields"": { ""type"": ""array"", ""items"": { ""type"": ""string"" } } }, ""required"": [""name"", ""fields""] }, ""description"": ""Table indexes for AxTable. Each index has a name and array of field names."" },
           ""fieldGroups"": { ""type"": ""array"", ""items"": { ""type"": ""object"", ""properties"": { ""name"": { ""type"": ""string"" }, ""label"": { ""type"": ""string"" }, ""fields"": { ""type"": ""array"", ""items"": { ""type"": ""string"" } } }, ""required"": [""name"", ""fields""] }, ""description"": ""Table field groups for AxTable. Each group has a name and array of field names."" },
           ""relations"": { ""type"": ""array"", ""items"": { ""type"": ""object"", ""properties"": { ""name"": { ""type"": ""string"" }, ""relatedTable"": { ""type"": ""string"" }, ""constraints"": { ""type"": ""array"", ""items"": { ""type"": ""object"", ""properties"": { ""field"": { ""type"": ""string"" }, ""relatedField"": { ""type"": ""string"" } } } } }, ""required"": [""name"", ""relatedTable""] }, ""description"": ""Table relations for AxTable. Each relation maps fields to related table fields."" },
@@ -89,19 +89,6 @@ namespace XppAiCopilotCompanion.McpServer
       }
     },
     {
-      ""name"": ""xpp_delete_object"",
-      ""description"": ""Deletes a D365FO X++ object using the MetaModel API. ONLY works on custom model objects."",
-      ""inputSchema"": {
-        ""type"": ""object"",
-        ""properties"": {
-          ""objectType"": { ""type"": ""string"", ""description"": ""The object type."" },
-          ""objectName"": { ""type"": ""string"", ""description"": ""The object name."" },
-          ""modelName"": { ""type"": ""string"", ""description"": ""The model containing the object. If omitted, uses active project's model."" }
-        },
-        ""required"": [""objectType"", ""objectName""]
-      }
-    },
-    {
       ""name"": ""xpp_find_object"",
       ""description"": ""Searches for D365FO metadata objects by name across ALL loaded models and packages using the MetaModel API. CRITICAL: Always use this instead of Get-ChildItem/dir/file searches on metadata folders. NEVER search the file system for X++ objects. Returns matching objects with type, model, and editability. PERFORMANCE TIP: Always provide objectType when known -- searching 1 type is 5-10x faster than searching all 10 types."",
       ""inputSchema"": {
@@ -135,7 +122,7 @@ namespace XppAiCopilotCompanion.McpServer
       ""inputSchema"": {
         ""type"": ""object"",
         ""properties"": {
-          ""objectType"": { ""type"": ""string"", ""description"": ""Required. Type of the TARGET object (the one being searched for). AxClass, AxTable, AxForm, AxEnum, AxView, AxQuery, AxEdt, AxDataEntityView, AxMap, AxService."" },
+          ""objectType"": { ""type"": ""string"", ""description"": ""Required. Type of the TARGET object (the one being searched for). AxClass, AxTable, AxForm, AxEnum, AxView, AxQuery, AxEdt, AxDataEntityView, AxService."" },
           ""objectName"": { ""type"": ""string"", ""description"": ""Required. Exact name of the target object to find references to."" },
           ""referenceKind"": { ""type"": ""string"", ""description"": ""Optional. Filter by reference kind. Any (default), TypeReference (code that uses the type), MethodCall (calls a method on this object), ClassExtended (extends this class), InterfaceImplementation (implements this interface), Attribute, MethodOverride."" },
           ""maxResults"": { ""type"": ""integer"", ""description"": ""Max results. Default 50. Max 200."" }
@@ -238,18 +225,21 @@ namespace XppAiCopilotCompanion.McpServer
     },
     {
       ""name"": ""xpp_validate_object"",
-      ""description"": ""Validates that a D365FO object exists, is added to the active VS project, and has the expected metadata properties/fields/relations. Use after xpp_create_object or xpp_update_object to confirm all metadata was applied correctly. Returns valid=true only when ALL checks pass: object exists, in project, and all specified properties/fields match. Returns a mismatches list describing any discrepancies."",
+      ""description"": ""Validates that a D365FO object exists, is added to the active VS project, and has the expected metadata. Performs deep property-level comparison on every supplied section. Use after xpp_create_object or xpp_update_object to confirm all metadata was applied correctly. Returns valid=true only when ALL checks pass. On failure, returns a mismatches array with the exact expected vs actual value for every discrepancy. Pass typedMetadata for comprehensive object-type-specific validation (form controls, design nodes, etc.)."",
       ""inputSchema"": {
         ""type"": ""object"",
         ""properties"": {
-          ""objectType"": { ""type"": ""string"", ""description"": ""The object type (AxClass, AxTable, AxEnum, AxEdt, AxView, AxQuery)."" },
+          ""objectType"": { ""type"": ""string"", ""description"": ""The object type (AxClass, AxTable, AxEnum, AxEdt, AxView, AxQuery, AxForm, AxSecurityRole, AxSecurityPrivilege, AxSecurityDuty, AxMenuItemDisplay, AxMenuItemOutput, AxMenuItemAction, AxMenu, etc.)."" },
           ""objectName"": { ""type"": ""string"", ""description"": ""The object name to validate."" },
-          ""typedMetadata"": { ""type"": ""object"", ""description"": ""Optional full typed metadata graph to validate as a subset against the current object."" },
-          ""properties"": { ""type"": ""object"", ""description"": ""Expected key-value property pairs to verify (e.g. {Label: '@MyLabel', IsExtensible: 'true'}). Each entry is checked against the actual object."" },
-          ""fields"": { ""type"": ""array"", ""items"": { ""type"": ""object"", ""properties"": { ""name"": { ""type"": ""string"" } }, ""required"": [""name""] }, ""description"": ""Expected table fields — only names are checked for existence."" },
-          ""enumValues"": { ""type"": ""array"", ""items"": { ""type"": ""object"", ""properties"": { ""name"": { ""type"": ""string"" } }, ""required"": [""name""] }, ""description"": ""Expected enum value names to verify exist on the enum."" },
-          ""indexes"": { ""type"": ""array"", ""items"": { ""type"": ""object"", ""properties"": { ""name"": { ""type"": ""string"" } }, ""required"": [""name""] }, ""description"": ""Expected index names to verify exist on the table."" },
-          ""relations"": { ""type"": ""array"", ""items"": { ""type"": ""object"", ""properties"": { ""name"": { ""type"": ""string"" } }, ""required"": [""name""] }, ""description"": ""Expected relation names to verify exist on the table."" }
+          ""typedMetadata"": { ""type"": ""object"", ""description"": ""Full typed metadata graph for deep recursive comparison against the current object. Use this as the primary comprehensive validator for object-type-specific metadata (AxForm controls and design, AxQuery data sources, AxSecurityRole privileges, etc.). Every property present in this graph is compared against the actual object."" },
+          ""properties"": { ""type"": ""object"", ""description"": ""Expected key-value property pairs. Each entry is compared (case-insensitive) against the actual object. Example: {Label: '@MyLabel', IsExtensible: 'true'}."" },
+          ""fields"": { ""type"": ""array"", ""items"": { ""type"": ""object"", ""properties"": { ""name"": { ""type"": ""string"" }, ""fieldType"": { ""type"": ""string"" }, ""extendedDataType"": { ""type"": ""string"" }, ""enumType"": { ""type"": ""string"" }, ""label"": { ""type"": ""string"" } }, ""required"": [""name""] }, ""description"": ""Expected table/view fields. Deep-compares name, fieldType, extendedDataType, enumType, and label when provided."" },
+          ""enumValues"": { ""type"": ""array"", ""items"": { ""type"": ""object"", ""properties"": { ""name"": { ""type"": ""string"" }, ""value"": { ""type"": ""integer"" }, ""label"": { ""type"": ""string"" } }, ""required"": [""name""] }, ""description"": ""Expected enum values. Deep-compares name, integer value, and label when provided."" },
+          ""indexes"": { ""type"": ""array"", ""items"": { ""type"": ""object"", ""properties"": { ""name"": { ""type"": ""string"" }, ""allowDuplicates"": { ""type"": ""boolean"" }, ""fields"": { ""type"": ""array"", ""items"": { ""type"": ""string"" } } }, ""required"": [""name""] }, ""description"": ""Expected indexes. Deep-compares name, allowDuplicates, and field list when provided."" },
+          ""relations"": { ""type"": ""array"", ""items"": { ""type"": ""object"", ""properties"": { ""name"": { ""type"": ""string"" }, ""relatedTable"": { ""type"": ""string"" }, ""constraints"": { ""type"": ""array"", ""items"": { ""type"": ""object"", ""properties"": { ""field"": { ""type"": ""string"" }, ""relatedField"": { ""type"": ""string"" } } } } }, ""required"": [""name""] }, ""description"": ""Expected relations. Deep-compares name, relatedTable, and constraint field mappings when provided."" },
+          ""fieldGroups"": { ""type"": ""array"", ""items"": { ""type"": ""object"", ""properties"": { ""name"": { ""type"": ""string"" }, ""label"": { ""type"": ""string"" }, ""fields"": { ""type"": ""array"", ""items"": { ""type"": ""string"" } } }, ""required"": [""name""] }, ""description"": ""Expected field groups. Deep-compares name, label, and field list when provided."" },
+          ""entryPoints"": { ""type"": ""array"", ""items"": { ""type"": ""object"", ""properties"": { ""name"": { ""type"": ""string"" }, ""objectType"": { ""type"": ""string"" }, ""objectName"": { ""type"": ""string"" }, ""grant"": { ""type"": ""string"" } }, ""required"": [""name""] }, ""description"": ""Expected security entry points. Deep-compares name, objectType, objectName, and grant when provided."" },
+          ""dataSources"": { ""type"": ""array"", ""items"": { ""type"": ""object"", ""properties"": { ""name"": { ""type"": ""string"" }, ""table"": { ""type"": ""string"" }, ""joinMode"": { ""type"": ""string"" }, ""linkType"": { ""type"": ""string"" }, ""dynamicFields"": { ""type"": ""boolean"" }, ""ranges"": { ""type"": ""array"" }, ""childDataSources"": { ""type"": ""array"" } }, ""required"": [""name""] }, ""description"": ""Expected query/view data sources. Deep-compares table, joinMode, linkType, ranges, and child data sources recursively."" }
         },
         ""required"": [""objectType"", ""objectName""]
       }
@@ -282,7 +272,6 @@ namespace XppAiCopilotCompanion.McpServer
                 case "xpp_read_object": return HandleReadObject(idToken, json);
                 case "xpp_update_object":
                 case "xpp_update_current_object": return DelegateToBridge(idToken, json, "update_object");
-                case "xpp_delete_object": return DelegateToBridge(idToken, json, "delete_object");
                 case "xpp_find_object": return HandleFindObject(idToken, json);
                 case "xpp_list_objects": return HandleListObjects(idToken, json);
                 case "xpp_find_references": return HandleFindReferences(idToken, json);
@@ -618,7 +607,34 @@ namespace XppAiCopilotCompanion.McpServer
         private static void AppendJsonArray(StringBuilder sb, string json, string key, string label)
         {
             string marker = "\"" + key + "\":[";
-            int idx = json.IndexOf(marker, StringComparison.Ordinal);
+
+            // Find the marker only at the top level of the JSON object (depth <= 1)
+            // to avoid matching nested arrays with the same key name (e.g. "fields"
+            // inside index or fieldGroup objects).
+            int idx = -1;
+            {
+                int d = 0; bool inS = false; bool es = false;
+                for (int i = 0; i < json.Length - marker.Length; i++)
+                {
+                    char c = json[i];
+                    if (es) { es = false; continue; }
+                    if (c == '\\') { es = true; continue; }
+
+                    // Check for marker BEFORE toggling string state, so that the
+                    // opening quote of a JSON key at the top level is matched.
+                    if (!inS && d == 1 && c == '"'
+                        && string.CompareOrdinal(json, i, marker, 0, marker.Length) == 0)
+                    {
+                        idx = i;
+                        break;
+                    }
+
+                    if (c == '"') { inS = !inS; continue; }
+                    if (inS) continue;
+                    if (c == '{' || c == '[') d++;
+                    if (c == '}' || c == ']') d--;
+                }
+            }
             if (idx < 0) return;
 
             // Find the full array including brackets

@@ -18,12 +18,15 @@ ownership rules, auto-add objects to the VS project, and handle all operations.
                                   editability. Pass objectType+objectName OR filePath.
   xpp_update_object            — Edit an existing object (update declaration, add/replace/remove
                                   methods, update metadata). Only works on custom model objects.
-  xpp_delete_object            — Delete a D365FO object. Only works on custom model objects.
 
   ── Discovery & Search ──
   xpp_find_object              — Search for objects by name across ALL models and packages.
                                   Supports partial name matching and type filtering.
   xpp_list_objects             — List objects filtered by model, type, and/or name pattern.
+  xpp_get_object_type_schema   — Returns a generated JSON schema for a D365FO metadata object
+                                  type based on reflective type inspection. Use this to discover
+                                  the full strongly-typed typedMetadata shape for create/update/
+                                  validate payloads.
   xpp_find_references          — Query the cross-reference database to find all objects that
                                   USE or REFERENCE a given object (SQL-indexed, sub-second).
                                   Ideal for: finding who uses a table, who extends a class,
