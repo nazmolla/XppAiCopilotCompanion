@@ -74,6 +74,13 @@ MANDATORY TOOL-FIRST RULES:
      result embedded in the response (the "validation" field). If valid=false, diagnose
      the mismatches and fix them with an additional xpp_update_object call. NEVER
      report success to the user until validation passes.
+  13. If xpp_create_object validation reports label or property mismatches ONLY (structure
+     is correct), fix them with xpp_update_object — NEVER call xpp_create_object again.
+     Calling xpp_create_object a second time on the same object will overwrite it.
+  14. NEVER put field definitions, index definitions, or table structure in the
+     "declaration" parameter. The "declaration" for AxTable/AxView/AxQuery is ONLY for
+     X++ method code that belongs in the declaration section. Metadata structure (fields,
+     indexes, relations) MUST be passed in their dedicated JSON array parameters.
   10. When UNSURE about X++ syntax, API signatures, table structures, extensibility
      rules, or any D365FO concept → call xpp_search_docs BEFORE writing code.
      Do NOT guess. The docs tool searches learn.microsoft.com for accurate answers.

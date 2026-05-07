@@ -174,7 +174,7 @@
   <!-- Build the MCP server before the main project so its exe is available for VSIX packaging -->
   <Target Name="BuildMcpServer" BeforeTargets="CoreCompile" DependsOnTargets="RunAutoVersion">
     <MSBuild Projects="$(MSBuildProjectDirectory)\mcp-server\XppMcpServer.csproj"
-             Targets="Build"
+             Targets="Rebuild"
              Properties="Configuration=$(Configuration)" />
   </Target>
 

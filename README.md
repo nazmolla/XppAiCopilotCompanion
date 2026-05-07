@@ -128,10 +128,10 @@ For detailed architecture diagrams, design decisions, data flow, reliability mec
 
 ### Prerequisites
 
-- Visual Studio 2022 (17.0+) — Community, Professional, or Enterprise
+- Visual Studio 2022 (17.14+) — Community, Professional, or Enterprise
 - .NET Framework 4.8
 - Visual Studio SDK workload (for building from source)
-- D365FO development tools extension (for use on a dev VM)
+- D365FO development tools extension (Microsoft.Dynamics.FinOps.ToolsVS2022)
 
 ### Build from Source
 
@@ -149,9 +149,11 @@ For detailed architecture diagrams, design decisions, data flow, reliability mec
 3. Follow the installer prompts
 4. Restart Visual Studio
 
+> **Upgrading:** On the first VS startup after installing a new version, the extension automatically detects the version mismatch, kills the old MCP server, cleans the companion folder, and starts fresh. No manual cleanup needed.
+
 ### Deploy to a D365FO Dev VM
 
-Copy the `.vsix` file to the dev VM and double-click to install. The extension will activate automatically when a solution is opened. The MCP server is started and stopped automatically by the VSIX.
+Copy the `.vsix` file to the dev VM and double-click to install. The extension activates automatically when a solution is opened. The MCP server starts and stops automatically.
 
 ---
 
@@ -159,14 +161,21 @@ Copy the `.vsix` file to the dev VM and double-click to install. The extension w
 
 ### Configure
 
-Metadata paths are **auto-detected** from the active D365FO configuration. The extension reads:
+Go to **Tools > Options > X++ AI Copilot > General** and set the **Environment Type** to match your D365FO environment:
 
-1. **Registry** — `HKCU\Software\Microsoft\Dynamics\AX7\Development\Configurations` → `CurrentMetadataConfig` (path to the active JSON config file) and `FrameworkDirectory` (fallback)
-2. **JSON config file** — under `%LOCALAPPDATA%\Microsoft\Dynamics365\XPPConfig` → `ModelStoreFolder` (custom metadata) and `ReferencePackagesPaths` (reference metadata)
+| Environment Type | When to use | PackagesLocalDirectory |
+|---|---|---|
+| **UDE** *(default)* | Unified Development Environment / remote dev box | Auto-detected from registry |
+| **Onebox** | Local all-in-one install (e.g. demo VM) | `C:\AOSService\PackagesLocalDirectory` *(default)* |
+| **CHE** | Cloud-Hosted Environment (local install) | `K:\AOSService\PackagesLocalDirectory` *(default)* |
 
-This means **zero configuration is needed** when the D365FO extension is properly set up (Extensions > Dynamics 365 > Configure Metadata).
+For **UDE**, metadata paths are auto-detected from the active D365FO VS configuration:
+1. **Registry** — `HKCU\Software\Microsoft\Dynamics\AX7\Development\Configurations` → `CurrentMetadataConfig`
+2. **JSON config file** — `%LOCALAPPDATA%\Microsoft\Dynamics365\XPPConfig` → `ModelStoreFolder` / `ReferencePackagesPaths`
 
-To override, go to **Tools > Options > X++ AI Copilot > General** and set explicit paths. When the options page fields are empty, the auto-detected paths are used.
+For **Onebox / CHE**, the default `PackagesLocalDirectory` paths are used automatically. Override them in the **Packages Local Directory** field if your installation uses a non-standard path.
+
+The **Metadata Roots** fields (Custom and Reference) can be used for fully custom path overrides on any environment type. Leave them empty to use the environment-driven auto-detection.
 
 ### MCP Server Registration
 
@@ -203,13 +212,32 @@ All commands are under **Tools** in the main menu:
 
 ## Configuration Reference
 
+### Environment
+
 | Setting | Default | Description |
 |---|---|---|
-| Custom Metadata Roots | *(auto-detect)* | Semicolon-separated paths to your model's metadata directories. Leave empty to auto-detect from the active D365FO configuration. |
-| Reference (MS) Metadata Roots | *(auto-detect)* | Semicolon-separated paths to Microsoft reference metadata. Leave empty to auto-detect from the active D365FO configuration. |
+| **Environment Type** | UDE | `UDE` = remote dev box (registry auto-detects paths). `Onebox` = local all-in-one. `CHE` = Cloud-Hosted Environment. |
+| **Packages Local Directory** | *(env default)* | Override path to `PackagesLocalDirectory`. Leave blank to use the default for the selected environment type. Ignored when Environment Type is UDE. |
+
+### Metadata Roots
+
+| Setting | Default | Description |
+|---|---|---|
+| Custom Metadata Roots | *(auto-detect)* | Semicolon-separated paths to your model's metadata directories. Leave empty to use environment-driven auto-detection. |
+| Reference (MS) Metadata Roots | *(auto-detect)* | Semicolon-separated paths to Microsoft reference metadata. Leave empty to use environment-driven auto-detection. |
+
+### Context Budget
+
+| Setting | Default | Description |
+|---|---|---|
 | Max Context Tokens | 6000 | Total token budget for the AI context payload |
 | Max Snippet Tokens Per Object | 350 | Token limit per individual object in context |
 | Max Active Document Tokens | 1000 | Token budget for the currently open file |
+
+### Selection
+
+| Setting | Default | Description |
+|---|---|---|
 | Top N Objects | 20 | Maximum relevant objects to include |
 | Min Custom Objects | 3 | Minimum custom objects guaranteed in context |
 | Min Reference Objects | 3 | Minimum MS reference objects guaranteed in context |
@@ -224,4 +252,4 @@ All commands are under **Tools** in the main menu:
 - **No label support for extension types**: Label files can be read/created for base types, but not yet for extensions.
 - **Single model scope**: Context pipeline doesn't yet distinguish between multiple models in a multi-model solution.
 - **AccessGrant on security entry points**: The `grant` field on `entryPoints` is not yet fully supported — `EntryPointType` and `ObjectName` are set, but granular access grants (Read, Update, Delete, Invoke) require a future enhancement.
-- **Config auto-detection depends on D365FO extension**: The registry key and JSON config are written by Microsoft's D365FO VS extension. If that extension is not installed or configured, paths must be set manually.
+- **UDE config auto-detection depends on D365FO extension**: The registry key and JSON config are written by Microsoft's D365FO VS extension. If that extension is not installed or not yet configured, set Environment Type to Onebox or CHE (or set Metadata Roots manually).

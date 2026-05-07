@@ -3,8 +3,27 @@ using Microsoft.VisualStudio.Shell;
 
 namespace XppAiCopilotCompanion
 {
+    public enum XppEnvironmentType
+    {
+        UDE,
+        Onebox,
+        CHE
+    }
+
     public sealed class XppCopilotOptionsPage : DialogPage
     {
+        [Category("Environment")]
+        [DisplayName("Environment Type")]
+        [Description("UDE = remote dev box (registry auto-detects PackagesLocalDirectory). Onebox / CHE = local install where all packages share a single directory.")]
+        [DefaultValue(XppEnvironmentType.UDE)]
+        public XppEnvironmentType EnvironmentType { get; set; } = XppEnvironmentType.UDE;
+
+        [Category("Environment")]
+        [DisplayName("Packages Local Directory")]
+        [Description("Override path for the shared PackagesLocalDirectory on Onebox or CHE. Leave blank to use the default: Onebox = C:\\AOSService\\PackagesLocalDirectory, CHE = K:\\AOSService\\PackagesLocalDirectory. Ignored when Environment Type is UDE.")]
+        [DefaultValue("")]
+        public string PackagesLocalDirectory { get; set; } = string.Empty;
+
         [Category("Metadata Roots")]
         [DisplayName("Custom Metadata Roots")]
         [Description("Semicolon-separated paths to custom X++ metadata directories. Leave empty to auto-detect from the active D365FO configuration.")]

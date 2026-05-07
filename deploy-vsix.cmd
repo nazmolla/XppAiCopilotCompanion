@@ -7,9 +7,18 @@ setlocal enabledelayedexpansion
 
 set "VSIX_DIR=%~dp0vsix-companion\bin\Release"
 set "COMPANION_DIR=%LOCALAPPDATA%\XppCopilotCompanion"
-set "VS_EXE=C:\Program Files\Microsoft Visual Studio\2022\Enterprise\Common7\IDE\devenv.exe"
-set "VSIX_INSTALLER=C:\Program Files\Microsoft Visual Studio\2022\Enterprise\Common7\IDE\VSIXInstaller.exe"
-set "PROJECT=C:\DevCode\D365FO\AnthologyFinanceHcm\AnthologyFinanceHcmVSProjects\NewReport\NewReport\NewReport.rnrproj"
+set "VSWHERE=%ProgramFiles(x86)%\Microsoft Visual Studio\Installer\vswhere.exe"
+if not exist "%VSWHERE%" set "VSWHERE=%ProgramFiles%\Microsoft Visual Studio\Installer\vswhere.exe"
+for /f "usebackq tokens=*" %%i in (`"%VSWHERE%" -latest -products * -requires Microsoft.VisualStudio.Component.CoreEditor -property installationPath`) do set "VS_ROOT=%%i"
+if not defined VS_ROOT (
+    echo ERROR: Could not detect Visual Studio installation via vswhere.
+    pause
+    exit /b 1
+)
+set "VS_EXE=%VS_ROOT%\Common7\IDE\devenv.exe"
+set "VSIX_INSTALLER=%VS_ROOT%\Common7\IDE\VSIXInstaller.exe"
+:: Optional: pass a solution/project path as first argument, otherwise VS opens with no project
+set "PROJECT=%~1"
 
 :: --- Find latest versioned VSIX ---
 set "LATEST_VSIX="
@@ -76,8 +85,12 @@ if %errorlevel% neq 0 (
 echo       VSIX installed.
 
 :: --- Step 5: Launch Visual Studio ---
-echo [5/5] Starting Visual Studio on project...
-start "" "%VS_EXE%" "%PROJECT%"
+echo [5/5] Starting Visual Studio...
+if defined PROJECT (
+    start "" "%VS_EXE%" "%PROJECT%"
+) else (
+    start "" "%VS_EXE%"
+)
 echo       VS launched.
 
 echo.

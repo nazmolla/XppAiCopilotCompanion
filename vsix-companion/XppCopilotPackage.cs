@@ -189,6 +189,7 @@ namespace XppAiCopilotCompanion
                 {
                     // MUST kill old processes BEFORE copying — the old exe is file-locked while running
                     report.AppendLine("Killing stale MCP servers before copy...");
+                    bool killedStaleProcess = false;
                     try
                     {
                         // Graceful HTTP shutdown first
@@ -213,6 +214,7 @@ namespace XppAiCopilotCompanion
                                 report.AppendLine("Pre-copy kill pid=" + p.Id);
                                 p.Kill();
                                 p.WaitForExit(2000);
+                                killedStaleProcess = true;
                             }
                             catch { }
                             finally { p.Dispose(); }
@@ -231,6 +233,24 @@ namespace XppAiCopilotCompanion
                     catch (Exception killEx)
                     {
                         report.AppendLine("Pre-copy cleanup error: " + killEx.Message);
+                    }
+
+                    // Full folder wipe only when a stale process was running (version mismatch).
+                    // When MCP was simply not running (crash/reboot), preserve existing files.
+                    if (killedStaleProcess)
+                    {
+                        try
+                        {
+                            if (Directory.Exists(stableDir))
+                            {
+                                Directory.Delete(stableDir, recursive: true);
+                                report.AppendLine("Companion folder cleaned (version mismatch).");
+                            }
+                        }
+                        catch (Exception cleanEx)
+                        {
+                            report.AppendLine("Companion folder clean failed: " + cleanEx.Message);
+                        }
                     }
 
                     // NOW copy exe to stable path (old process is dead, file is unlocked)
