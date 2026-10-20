@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.IO;
+using System.Linq;
 using System.Net;
 using System.Text;
 using System.Threading;
@@ -234,6 +235,8 @@ namespace XppAiCopilotCompanion.MetaModel
                     return HandleValidateObject(body);
                 case "get_object_type_schema":
                     return HandleGetObjectTypeSchema(body);
+                case "get_form_layout":
+                    return HandleGetFormLayout(body);
                 default:
                     return "{\"success\":false,\"message\":\"Unknown action: " + EscapeJson(action ?? "") + "\"}";
             }
@@ -261,7 +264,14 @@ namespace XppAiCopilotCompanion.MetaModel
                 FieldGroups = ParseFieldGroups(body),
                 Relations = ParseRelations(body),
                 EntryPoints = ParseEntryPoints(body),
-                DataSources = ParseDataSources(body)
+                DataSources = ParseDataSources(body),
+                Controls = ParseFormControls(body, "controls"),
+                ControlModifications = ParseControlModifications(body),
+                Privileges = ExtractJsonStringArray(body, "privileges")?.ToList(),
+                Duties = ExtractJsonStringArray(body, "duties")?.ToList(),
+                DataEntityPermissions = ParseDataEntityPermissions(body),
+                EntityFields = ParseEntityFields(body),
+                SkipStagingTable = "true".Equals(ExtractJsonString(body, "skipStagingTable"), StringComparison.OrdinalIgnoreCase)
             };
 
             // Reject any formatted markup in declaration or methods
@@ -289,10 +299,12 @@ namespace XppAiCopilotCompanion.MetaModel
             }
 
             // Post-creation validation: verify object exists in project and metadata applied
-            var validation = _bridge.ValidateObject(BuildValidateRequest(
+            var createValidateReq = BuildValidateRequest(
                 req.ObjectType, req.ObjectName, req.TypedMetadataJson,
                 req.Properties, req.Fields, req.EnumValues, req.Indexes,
-                req.Relations, req.FieldGroups, req.EntryPoints, req.DataSources));
+                req.Relations, req.FieldGroups, req.EntryPoints, req.DataSources);
+            createValidateReq.Controls = req.Controls;
+            var validation = _bridge.ValidateObject(createValidateReq);
 
             return SerializeResultWithValidation(result, validation);
         }
@@ -332,7 +344,15 @@ namespace XppAiCopilotCompanion.MetaModel
                 FieldGroups = ParseFieldGroups(body),
                 Relations = ParseRelations(body),
                 EntryPoints = ParseEntryPoints(body),
-                DataSources = ParseDataSources(body)
+                DataSources = ParseDataSources(body),
+                Controls = ParseFormControls(body, "controls"),
+                ControlModifications = ParseControlModifications(body),
+                Privileges = ExtractJsonStringArray(body, "privileges")?.ToList(),
+                Duties = ExtractJsonStringArray(body, "duties")?.ToList(),
+                DataEntityPermissions = ParseDataEntityPermissions(body),
+                EntityFields = ParseEntityFields(body),
+                SkipStagingTable = "true".Equals(ExtractJsonString(body, "skipStagingTable"), StringComparison.OrdinalIgnoreCase),
+                RemoveSecurityItems = ExtractJsonStringArray(body, "removeSecurityItems")?.ToList()
             };
 
             // Reject any formatted markup in declaration or methods
@@ -355,10 +375,12 @@ namespace XppAiCopilotCompanion.MetaModel
             }
 
             // Post-update validation: verify metadata was applied
-            var validation = _bridge.ValidateObject(BuildValidateRequest(
+            var updateValidateReq = BuildValidateRequest(
                 req.ObjectType, req.ObjectName, req.TypedMetadataJson,
                 req.Properties, req.Fields, req.EnumValues, req.Indexes,
-                req.Relations, req.FieldGroups, req.EntryPoints, req.DataSources));
+                req.Relations, req.FieldGroups, req.EntryPoints, req.DataSources);
+            updateValidateReq.Controls = req.Controls;
+            var validation = _bridge.ValidateObject(updateValidateReq);
 
             return SerializeResultWithValidation(result, validation);
         }
@@ -407,6 +429,7 @@ namespace XppAiCopilotCompanion.MetaModel
                 ParseFieldGroups(body),
                 ParseEntryPoints(body),
                 ParseDataSources(body));
+            req.Controls = ParseFormControls(body, "controls");
             var result = _bridge.ValidateObject(req);
             BridgeLog("HandleValidateObject DONE type=" + objectType + " name=" + objectName + " valid=" + result?.Valid);
             return SerializeValidateResult(result);
@@ -419,18 +442,36 @@ namespace XppAiCopilotCompanion.MetaModel
             return SerializeObjectTypeSchemaResult(result);
         }
 
+        private string HandleGetFormLayout(string body)
+        {
+            string formName = ExtractJsonString(body, "formName") ?? ExtractJsonString(body, "objectName");
+            string rootControl = ExtractJsonString(body, "rootControl");
+            int.TryParse(ExtractJsonString(body, "maxDepth"), out int maxDepth);
+            BridgeLog("HandleGetFormLayout form=" + formName + " root=" + rootControl + " depth=" + maxDepth);
+
+            var result = _bridge.GetFormLayout(formName, rootControl, maxDepth);
+            var sb = new StringBuilder();
+            sb.Append("{\"success\":" + (result.Success ? "true" : "false"));
+            if (result.Message != null)
+                sb.Append(",\"message\":\"" + EscapeJson(result.Message) + "\"");
+            if (result.Layout != null)
+                sb.Append(",\"layout\":\"" + EscapeJson(result.Layout) + "\"");
+            sb.Append("}");
+            return sb.ToString();
+        }
+
         private string HandleFindReferences(string body)
         {
             string objectType = ExtractJsonString(body, "objectType");
             string objectName = ExtractJsonString(body, "objectName");
             string referenceKind = ExtractJsonString(body, "referenceKind");
             string maxStr = ExtractJsonString(body, "maxResults");
-            int maxResults = 50;
+            int maxResults = 25;
             if (!string.IsNullOrEmpty(maxStr)) int.TryParse(maxStr, out maxResults);
             if (maxResults < 1) maxResults = 1;
-            if (maxResults > 200) maxResults = 200;
+            if (maxResults > 100) maxResults = 100;
 
-            var result = _bridge.FindReferences(objectType, objectName, referenceKind, maxResults);
+            var result = _bridge.FindReferences(objectType, objectName, ExtractJsonString(body, "memberName"), referenceKind, maxResults);
 
             var sb = new StringBuilder();
             sb.Append("{\"success\":" + (result.Success ? "true" : "false"));
@@ -469,10 +510,14 @@ namespace XppAiCopilotCompanion.MetaModel
             string exactStr = ExtractJsonString(body, "exactMatch");
             bool exact = "true".Equals(exactStr, StringComparison.OrdinalIgnoreCase);
             string maxStr = ExtractJsonString(body, "maxResults");
-            int maxResults = 25;
+            int maxResults = 10;
             if (!string.IsNullOrEmpty(maxStr)) int.TryParse(maxStr, out maxResults);
             if (maxResults < 1) maxResults = 1;
-            if (maxResults > 100) maxResults = 100;
+            if (maxResults > 50) maxResults = 50;
+
+            if (!exact && (objectName ?? "").Trim().Length < 3)
+                return "{\"success\":false,\"message\":\"objectName must be at least 3 characters for partial matching (or set exactMatch=true). Search for a specific object name.\",\"matches\":[]}";
+
             var result = _bridge.FindObject(objectName, objectType, exact, maxResults);
 
             var sb = new StringBuilder();
@@ -499,14 +544,16 @@ namespace XppAiCopilotCompanion.MetaModel
             string objectType = ExtractJsonString(body, "objectType");
             string nameFilter = ExtractJsonString(body, "nameFilter");
             string maxStr = ExtractJsonString(body, "maxResults");
-            int maxResults = 25;
+            int maxResults = 10;
             if (!string.IsNullOrEmpty(maxStr)) int.TryParse(maxStr, out maxResults);
             if (maxResults < 1) maxResults = 1;
-            if (maxResults > 100) maxResults = 100;
+            if (maxResults > 50) maxResults = 50;
 
-            // Require nameFilter to prevent full metadata scans that time out
-            if (string.IsNullOrWhiteSpace(nameFilter))
-                return "{\"success\":false,\"message\":\"nameFilter is required. Provide a substring to search for (e.g. 'CustTable').\",\"objects\":[]}";
+            // Broad filters force a full metadata scan on the VS UI thread and freeze VS
+            if (string.IsNullOrWhiteSpace(nameFilter) || nameFilter.Trim().Length < 3)
+                return "{\"success\":false,\"message\":\"nameFilter must be at least 3 characters (e.g. 'CustTable'). To see what a model contains, use xpp_list_model_objects.\",\"objects\":[]}";
+            if (!string.IsNullOrWhiteSpace(modelName) && string.IsNullOrWhiteSpace(objectType))
+                return "{\"success\":false,\"message\":\"objectType is required when modelName is set (model filtering is expensive per object).\",\"objects\":[]}";
 
             var result = _bridge.ListObjects(modelName, objectType, nameFilter, maxResults);
 
@@ -569,8 +616,10 @@ namespace XppAiCopilotCompanion.MetaModel
             string labelId = ExtractJsonString(body, "labelId");
             string searchText = ExtractJsonString(body, "searchText");
             string maxStr = ExtractJsonString(body, "maxResults");
-            int maxResults = 50;
+            int maxResults = 25;
             if (!string.IsNullOrEmpty(maxStr)) int.TryParse(maxStr, out maxResults);
+            if (maxResults < 1) maxResults = 1;
+            if (maxResults > 100) maxResults = 100;
             var result = _bridge.ReadLabel(labelFileId, language, labelId, searchText, maxResults);
 
             var sb = new StringBuilder();
@@ -764,9 +813,66 @@ namespace XppAiCopilotCompanion.MetaModel
             SerializeEntryPoints(sb, r.EntryPoints);
             // Query DataSources
             SerializeDataSources(sb, r.DataSources);
+            // Form extension controls
+            SerializeFormControls(sb, "controls", r.Controls);
+            SerializeControlModifications(sb, r.ControlModifications);
 
             sb.Append("}");
             return sb.ToString();
+        }
+
+        private static void SerializeFormControls(StringBuilder sb, string key, System.Collections.Generic.List<FormControlDto> controls)
+        {
+            if (controls == null || controls.Count == 0) return;
+            sb.Append(",\"" + key + "\":[");
+            for (int i = 0; i < controls.Count; i++)
+            {
+                if (i > 0) sb.Append(",");
+                var c = controls[i];
+                sb.Append("{\"name\":\"" + EscapeJson(c.Name) + "\"");
+                AppendOptionalJsonString(sb, "controlType", c.ControlType);
+                AppendOptionalJsonString(sb, "parent", c.Parent);
+                AppendOptionalJsonString(sb, "position", c.Position);
+                AppendOptionalJsonString(sb, "previousSibling", c.PreviousSibling);
+                AppendOptionalJsonString(sb, "dataSource", c.DataSource);
+                AppendOptionalJsonString(sb, "dataField", c.DataField);
+                AppendOptionalJsonString(sb, "dataGroup", c.DataGroup);
+                AppendOptionalJsonString(sb, "label", c.Label);
+                if (c.Controls.Count > 0)
+                {
+                    var nested = new StringBuilder();
+                    SerializeFormControls(nested, "controls", c.Controls);
+                    sb.Append(nested);
+                }
+                sb.Append("}");
+            }
+            sb.Append("]");
+        }
+
+        private static void SerializeControlModifications(StringBuilder sb, System.Collections.Generic.List<ControlModificationDto> mods)
+        {
+            if (mods == null || mods.Count == 0) return;
+            sb.Append(",\"controlModifications\":[");
+            for (int i = 0; i < mods.Count; i++)
+            {
+                if (i > 0) sb.Append(",");
+                sb.Append("{\"name\":\"" + EscapeJson(mods[i].Name) + "\",\"properties\":{");
+                bool first = true;
+                foreach (var kv in mods[i].Properties ?? new System.Collections.Generic.Dictionary<string, string>())
+                {
+                    if (!first) sb.Append(",");
+                    sb.Append("\"" + EscapeJson(kv.Key) + "\":\"" + EscapeJson(kv.Value ?? "") + "\"");
+                    first = false;
+                }
+                sb.Append("}}");
+            }
+            sb.Append("]");
+        }
+
+        private static void AppendOptionalJsonString(StringBuilder sb, string key, string value)
+        {
+            if (!string.IsNullOrEmpty(value))
+                sb.Append(",\"" + key + "\":\"" + EscapeJson(value) + "\"");
         }
 
         private static void SerializeEnumValues(StringBuilder sb, System.Collections.Generic.List<EnumValueDto> values)
@@ -1489,6 +1595,91 @@ namespace XppAiCopilotCompanion.MetaModel
             return result.Count > 0 ? result : null;
         }
 
+        private System.Collections.Generic.List<DataEntityPermissionDto> ParseDataEntityPermissions(string body)
+        {
+            string arrayJson = ExtractJsonArray(body, "dataEntityPermissions");
+            if (arrayJson == null) return null;
+            var result = new System.Collections.Generic.List<DataEntityPermissionDto>();
+            foreach (string obj in SplitJsonObjects(arrayJson))
+            {
+                string name = ExtractJsonString(obj, "name");
+                if (string.IsNullOrEmpty(name)) continue;
+                result.Add(new DataEntityPermissionDto
+                {
+                    Name = name,
+                    Grant = ExtractJsonString(obj, "grant"),
+                    IntegrationMode = ExtractJsonString(obj, "integrationMode")
+                });
+            }
+            return result.Count > 0 ? result : null;
+        }
+
+        private System.Collections.Generic.List<EntityFieldDto> ParseEntityFields(string body)
+        {
+            string arrayJson = ExtractJsonArray(body, "entityFields");
+            if (arrayJson == null) return null;
+            var result = new System.Collections.Generic.List<EntityFieldDto>();
+            foreach (string obj in SplitJsonObjects(arrayJson))
+            {
+                string name = ExtractJsonString(obj, "name");
+                if (string.IsNullOrEmpty(name)) continue;
+                string mandatory = ExtractJsonString(obj, "mandatory");
+                result.Add(new EntityFieldDto
+                {
+                    Name = name,
+                    DataSource = ExtractJsonString(obj, "dataSource"),
+                    DataField = ExtractJsonString(obj, "dataField"),
+                    Label = ExtractJsonString(obj, "label"),
+                    Mandatory = mandatory == null ? (bool?)null : "true".Equals(mandatory, StringComparison.OrdinalIgnoreCase)
+                });
+            }
+            return result.Count > 0 ? result : null;
+        }
+
+        private System.Collections.Generic.List<FormControlDto> ParseFormControls(string json, string key)
+        {
+            string arrayJson = ExtractJsonArray(json, key);
+            if (arrayJson == null) return null;
+
+            var result = new System.Collections.Generic.List<FormControlDto>();
+            foreach (string obj in SplitJsonObjects(arrayJson))
+            {
+                string name = ExtractJsonString(obj, "name");
+                if (string.IsNullOrEmpty(name)) continue;
+                result.Add(new FormControlDto
+                {
+                    Name = name,
+                    ControlType = ExtractJsonString(obj, "controlType") ?? ExtractJsonString(obj, "type"),
+                    Parent = ExtractJsonString(obj, "parent"),
+                    Position = ExtractJsonString(obj, "position"),
+                    PreviousSibling = ExtractJsonString(obj, "previousSibling"),
+                    DataSource = ExtractJsonString(obj, "dataSource"),
+                    DataField = ExtractJsonString(obj, "dataField"),
+                    DataGroup = ExtractJsonString(obj, "dataGroup"),
+                    Label = ExtractJsonString(obj, "label"),
+                    Properties = ExtractJsonObject(obj, "properties"),
+                    Controls = ParseFormControls(obj, "controls") ?? new System.Collections.Generic.List<FormControlDto>()
+                });
+            }
+            BridgeLog("ParseFormControls(" + key + "): parsed " + result.Count + " controls");
+            return result.Count > 0 ? result : null;
+        }
+
+        private System.Collections.Generic.List<ControlModificationDto> ParseControlModifications(string body)
+        {
+            string arrayJson = ExtractJsonArray(body, "controlModifications");
+            if (arrayJson == null) return null;
+
+            var result = new System.Collections.Generic.List<ControlModificationDto>();
+            foreach (string obj in SplitJsonObjects(arrayJson))
+            {
+                string name = ExtractJsonString(obj, "name");
+                if (string.IsNullOrEmpty(name)) continue;
+                result.Add(new ControlModificationDto { Name = name, Properties = ExtractJsonObject(obj, "properties") });
+            }
+            return result.Count > 0 ? result : null;
+        }
+
         private System.Collections.Generic.List<QueryDataSourceDto> ParseDataSources(string body)
         {
             string arrayJson = ExtractJsonArray(body, "dataSources");
@@ -1573,7 +1764,8 @@ namespace XppAiCopilotCompanion.MetaModel
             {
                 "objectType", "objectName", "modelName", "declaration", "methods",
                 "enumValues", "fields", "indexes", "fieldGroups", "relations",
-                "entryPoints", "dataSources", "typedMetadata", "properties", "action"
+                "entryPoints", "dataSources", "typedMetadata", "properties", "action",
+                "privileges", "duties", "dataEntityPermissions", "entityFields", "skipStagingTable", "removeSecurityItems"
             };
 
         private static System.Collections.Generic.Dictionary<string, string> ExtractFlatProperties(string json)

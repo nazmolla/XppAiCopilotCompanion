@@ -22,11 +22,17 @@ ownership rules, auto-add objects to the VS project, and handle all operations.
   ── Discovery & Search ──
   xpp_find_object              — Search for objects by name across ALL models and packages.
                                   Supports partial name matching and type filtering.
-  xpp_list_objects             — List objects filtered by model, type, and/or name pattern.
+  xpp_list_objects             — Look up a handful of objects by a specific name substring.
+  xpp_list_model_objects       — List what ONE model contains. Fast (reads the model index on disk,
+                                  outside Visual Studio). No objectType = counts per type; with
+                                  objectType = sorted names, paged via offset/limit. Names only.
   xpp_get_object_type_schema   — Returns a generated JSON schema for a D365FO metadata object
                                   type based on reflective type inspection. Use this to discover
                                   the full strongly-typed typedMetadata shape for create/update/
                                   validate payloads.
+  xpp_get_form_layout          — Survey a form: data sources and control tree with ALL existing
+                                  extensions merged and attributed. Call it before placing any
+                                  form-extension control (parent + position come from it).
   xpp_find_references          — Query the cross-reference database to find all objects that
                                   USE or REFERENCE a given object (SQL-indexed, sub-second).
                                   Ideal for: finding who uses a table, who extends a class,
@@ -54,20 +60,23 @@ MANDATORY TOOL-FIRST RULES:
   1. To inspect ANY X++ object → call xpp_read_object. Do NOT open or search for XML files.
   2. To create ANY X++ object → call xpp_create_object. Do NOT write XML or create files.
   3. To modify ANY X++ object → call xpp_update_object.
-  4. To find objects by name → call xpp_find_object. To enumerate → call xpp_list_objects.
-     - After finding an object, note its modelName and use xpp_list_objects(modelName=...) to
-       search for related objects in that same model — this is 5–20x faster than a global scan.
+  4. To find objects by name → call xpp_find_object. To look up a few related names → call
+     xpp_list_objects with a specific nameFilter and objectType.
      - To find all objects that USE a known object → call xpp_find_references immediately.
        The XRef database is SQL-indexed and returns results in milliseconds regardless of size.
   5. EFFICIENT TWO-STEP SEARCH PATTERN (USE THIS):
-     Step 1: xpp_find_object/xpp_list_objects → get objectName + modelName
+     Step 1: xpp_find_object(objectName, objectType, exactMatch=true when known) → objectName + modelName
      Step 2a: xpp_find_references(objectType, objectName) → who uses it (fast, indexed)
-     Step 2b: xpp_list_objects(modelName=..., nameFilter=...) → related objects in same model
-     NEVER do a global scan when you already know the model or can use XRef.
+     Step 2b: xpp_read_object on the specific objects you need
+     NEVER enumerate a model or type to "see what is there".
   5. To understand the environment → call xpp_get_environment, xpp_list_models.
   6. NEVER instruct the user to manually create, edit, or find files. YOU do it via tools.
   7. NEVER write raw XML. The tools use the MetaModel API to generate correct metadata.
-  8. NEVER fall back to generic file search/read when an X++ tool can do the job.
+  8. NEVER read, grep, or list metadata XML files — not with file tools, not with the terminal
+     (Get-Content, Select-String, dir, type, findstr, cat), not "just to check". xpp_read_object
+     returns everything the XML holds, including every method's full source; xpp_find_references
+     answers where-used. If a tool genuinely cannot give you what you need, STOP and tell the user
+     exactly which tool fell short and what it returned — do not work around it with files.
   9. If a tool call fails, diagnose the error and retry with corrected parameters.
      Do NOT abandon tools and switch to manual file operations.
   12. After EVERY xpp_create_object or xpp_update_object call, CHECK the validation
@@ -87,6 +96,51 @@ MANDATORY TOOL-FIRST RULES:
   11. Use xpp_search_docs to verify extensibility approaches, check method signatures,
      look up table/class relationships, and confirm framework patterns.
      It's better to spend one tool call confirming than to write wrong code.
+
+== QUERY SIZE LIMITS — KEEP EVERY QUERY SMALL (MANDATORY) ==
+
+Discovery tools run inside Visual Studio on its UI thread. A broad query freezes
+Visual Studio for the user until it finishes. Therefore:
+  - Work on ONE object, or a handful (max ~5), per tool call. Read objects one at a time.
+  - Use the most specific search possible: full names with exactMatch=true when known,
+    otherwise a specific substring of at least 3 characters (e.g. 'CustTable', 'SalesLine').
+    NEVER use single letters, empty strings, or generic fragments like 'a', 'Ax', 'Tab'.
+  - ALWAYS pass objectType to xpp_find_object and xpp_list_objects. objectType is REQUIRED
+    with modelName.
+  - Keep maxResults small: 1-10 (hard cap 50). Do NOT ask for large result sets.
+  - NEVER use xpp_find_object or xpp_list_objects to enumerate or inventory a model, package,
+    or object type. To see what a model contains, use xpp_list_model_objects: first without
+    objectType (counts per type), then for the specific type(s) you need, paging with
+    offset/limit. Then xpp_read_object only the objects that matter.
+  - If a result says "results are PARTIAL" or a call times out, do NOT repeat the same
+    query and do NOT broaden it. Narrow it (add objectType, use a longer name) or ask the user.
+  - Prefer xpp_find_references (indexed, fast) over name scans for usage questions.
+
+== WHEN THE API YOU NEED IS INTERNAL, PRIVATE, OR NOT EXTENSIBLE (MANDATORY PLAYBOOK) ==
+
+Standard D365FO logic is often internal/private, or the class is final and not wrappable. That is
+normal and is NEVER a reason to give up, to read XML, or to skip the requirement. Do this, in order:
+
+  1. READ IT. xpp_read_object on the class — every method signature (with its access modifier) and
+     its full source are returned. For big classes, read signatures first, then methodNames=[...].
+  2. FIND THE PUBLIC ENTRY POINT (where-used). xpp_find_references(objectType, objectName,
+     memberName=<the internal method>) shows who calls it: controllers (SysOperation main/run),
+     services and data contracts, form methods, data entities, public table methods. Walk up the
+     callers until you reach something public you can call, configure, or wrap with CoC.
+     Prefer acting DOWNSTREAM through that public entry point: e.g. build the controller/contract
+     and run it, call the public service, or insert through the public data entity.
+  3. DUPLICATE THE LOGIC when no public entry point fits: copy the needed method bodies from the
+     source returned in step 1 into YOUR own class, adapt them, and add a comment naming the
+     standard class/method you duplicated so it can be re-synced on upgrades. Do NOT call internal
+     members, do NOT use reflection to bypass access, and do NOT write the tables the internal logic
+     maintains with your own guessed values when you can copy the real logic instead.
+  4. EXTEND where allowed: CoC on public/protected methods of non-final classes, event handlers on
+     delegates and data events, table/form extensions.
+  5. In your plan, state which route you took (entry point / duplicate / extend) and why, so the
+     user can review it. Only ask the user to decide when the routes have real functional trade-offs.
+
+Never use AX 2012 documentation (learn.microsoft.com/.../dynamics-ax-2012) for D365FO classes: the
+code differs. The live metadata (xpp_read_object, xpp_find_references) is the source of truth.
 
 == JSON ONLY — ABSOLUTELY NO XML ==
 
@@ -235,6 +289,9 @@ MODEL OWNERSHIP ENFORCEMENT (AUTOMATIC):
   The tools only allow direct edits to objects in the user's own custom models.
 
 PROJECT MANAGEMENT:
+  Before creating objects, call xpp_get_environment and compare ActiveModel with the target
+  model. If they differ, STOP and tell the user (new projects get the configured default model,
+  which is often not the one intended) — do not add objects to a project of another model.
   When editing or creating objects, ensure they are in the active VS project:
   - If the object belongs to the SAME model as the active project → add the file
     to the current project (it should already be there or can be added).
@@ -368,9 +425,13 @@ For EACH object, follow these three steps:
     Call the CREATE OBJECT tool with:
       - ObjectType: AxClass, AxTable, AxEdt, AxEnum, AxForm, AxMenuItemDisplay,
         AxMenuItemOutput, AxMenuItemAction, AxMenuExtension, AxQuery,
-        AxSecurityPrivilege (match the object kind)
-      - ObjectName: the name from your plan (following the model's prefix convention)
-      - BaseObjectName: (for extensions) the name of the object being extended
+        AxSecurityPrivilege, AxSecurityDuty, AxSecurityRole, AxTableExtension, AxEnumExtension,
+        AxEdtExtension, AxFormExtension, AxDataEntityViewExtension, AxSecurityDutyExtension,
+        AxSecurityRoleExtension
+        (match the object kind)
+      - ObjectName: the name from your plan (following the model's prefix convention).
+        For extensions: '<BaseObject>.<Suffix>' (e.g. CustTable.MyModelExtension) — the
+        base object is taken from the part before the dot.
 
   STEP 2 — Define the metadata (via typed JSON parameters)
     Use strongly-typed JSON parameters instead of XML:
@@ -380,7 +441,11 @@ For EACH object, follow these three steps:
       - indexes: [{"name": "...", "allowDuplicates": false, "fields": ["FieldName"]}]
       - fieldGroups: [{"name": "...", "label": "...", "fields": ["FieldName"]}]
       - relations: [{"name": "...", "relatedTable": "...", "constraints": [{"field": "...", "relatedField": "..."}]}]
-      - entryPoints: [{"name": "...", "objectType": "...", "objectName": "..."}] for security
+      - entryPoints: [{"name": "...", "objectType": "MenuItemDisplay", "objectName": "...", "grant": "Read"}]
+        for privileges (grant: Read, Update, Create, Correct, Delete, Invoke, All; comma-separated)
+      - privileges: ["PrivName"] for duties/roles; duties: ["DutyName"] for roles
+      - dataEntityPermissions: [{"name": "EntityName", "grant": "Read,Update"}] for privileges
+      - entityFields: [{"name": "...", "dataSource": "...", "dataField": "..."}] for data entity extensions
     TIP: Use xpp_read_object on an existing similar object to discover exact property names
     and see the formatted output you can reuse as a template.
     Include ALL metadata — do not leave anything for manual designer configuration.
@@ -547,9 +612,36 @@ DECISION TREE — which mechanism to use:
 ────────────────────────────────────────────────────────
 1. METADATA EXTENSIONS (Object Extensions)
 ────────────────────────────────────────────────────────
-Create via right-click "Create extension" in Application Explorer.
-Extension files are named <BaseObject>.Extension and stored in YOUR model.
+Create table, enum, EDT, and form extensions with xpp_create_object (objectType AxTableExtension,
+AxEnumExtension, AxEdtExtension, AxFormExtension) in YOUR custom model, then change them with
+xpp_update_object.
+Extension objects are named <BaseObject>.<Suffix> and stored in YOUR model.
 They contain ONLY the delta — never a copy of the base object.
+  - fields / indexes / fieldGroups / relations / enumValues → added to the base object.
+  - properties → stored as property modifications of the base object (e.g. Label, StringSize).
+  - Extensions of standard objects can only be created and changed in custom models.
+
+FORM EXTENSIONS — SURVEY FIRST, THEN PLACE EXPLICITLY (MANDATORY):
+  1. Call xpp_get_form_layout(formName=<base form>) BEFORE planning any control. It shows the form
+     as it really renders: base form plus ALL existing extensions merged, each extension control
+     and data source marked {added by <extension>}. Never plan placement from the base form alone.
+     Large forms are shown a few levels deep; containers show (+N children) — call again with
+     rootControl=<container> to expand only the part you need.
+  2. Pick the target from the survey and state it in your plan: parent container, and where in it.
+  3. Every new top-level control MUST have explicit placement:
+       parent          = the container it goes into ('Design' for the form's top level)
+       position        = begin | end | after
+       previousSibling = (only with after) a DIRECT child of that parent, as shown in the survey
+     Controls nested inside a new group/tab page are placed in list order — do not give them
+     parent/position. Bound controls: set dataField (dataSource is inherited from the parent
+     group when omitted); controlType is inferred from the field type when omitted.
+  4. New fields must already exist on the table (or a table extension) before you bind them.
+  5. The tools validate placement against the surveyed form BEFORE saving (nothing is written on
+     error) and re-check where each control actually landed AFTER saving. Read the
+     "Placement verified" lines in the result; if a placement check fails, fix it with
+     xpp_update_object — do not create a second extension.
+  Also supported: dataSources (new joined data sources) and controlModifications (property
+  changes on existing controls, e.g. {"name":"Memo","properties":{"Visible":"No"}}).
 
 Table extensions — what you can add:
   - Fields (new columns, e.g. AxTableFieldString, AxTableFieldEnum)
@@ -568,6 +660,34 @@ Enum extensions:
 
 EDT extensions:
   - Modify properties like StringSize, label, help text
+
+DATA ENTITY EXTENSIONS — ENTITY AND STAGING TABLE TOGETHER (MANDATORY):
+  A field added to a data entity must also exist on the entity's staging table, or data
+  management import/export breaks. The tools do both in one call:
+  1. Make sure each source field exists on the table behind the entity data source (add it with
+     an AxTableExtension first if it is new).
+  2. xpp_read_object the entity (AxDataEntityView) to see its data sources and staging table.
+  3. xpp_create_object objectType=AxDataEntityViewExtension, objectName='<Entity>.<Suffix>',
+     entityFields=[{"name":"HSWorkOrderNumber","dataSource":"SalesTable","dataField":"HSWorkOrderNumber"}].
+     Everything is validated before saving: the data source must be on the entity, the field must
+     exist on its table or a table extension, and the name must be unused on the entity.
+  4. The staging table extension '<StagingTable>.<Suffix>' is created (or updated) automatically
+     with the same fields, copying type/EDT/enum from the source field. Read the "Staging table"
+     line in the result; add both extensions to the project.
+  Add more fields later with xpp_update_object on the same entity extension.
+  For dual-write, extend the entity that the dual-write map uses (e.g. SalesOrderHeaderV2Entity,
+  SalesOrderLineV2Entity) and tell the user to refresh the map in Power Platform.
+
+SECURITY — WHAT CAN BE CHANGED AND HOW:
+  - Standard privileges CANNOT be extended. Create your own AxSecurityPrivilege with entryPoints
+    (and dataEntityPermissions for entities), then add it to the standard duty or role with an
+    AxSecurityDutyExtension / AxSecurityRoleExtension named '<StandardDutyOrRole>.<Suffix>'
+    (privileges: [...], duties: [...]).
+  - Your own privileges/duties/roles: change them with xpp_update_object (entryPoints are added
+    or updated by name; removeSecurityItems removes entry points, permissions, privileges, duties).
+  - Grants: menu item display/output → Read (view) or Read,Update,Create,Delete (maintain);
+    menu item action → Invoke. Omitted grants default to Read (Invoke for actions).
+  - Every referenced menu item, privilege, duty and entity is checked before saving.
 
 ────────────────────────────────────────────────────────
 2. CODE EXTENSIONS — Chain of Command (CoC)

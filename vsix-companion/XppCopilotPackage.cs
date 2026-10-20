@@ -36,7 +36,7 @@ namespace XppAiCopilotCompanion
     // Must match ServerVersion in mcp-server/Program.cs.
     // When the server exe is updated, bump this to force stale cached
     // processes to be killed and replaced with the new binary.
-    private const string ExpectedMcpServerVersion = "0.6.0";
+    private const string ExpectedMcpServerVersion = "0.11.0";
 
         protected override async Task InitializeAsync(
             CancellationToken cancellationToken,
@@ -764,7 +764,9 @@ namespace XppAiCopilotCompanion
                         && listResp.Contains("xpp_search_docs")
                         && listResp.Contains("xpp_list_models")
                         && listResp.Contains("xpp_add_to_project")
-                        && listResp.Contains("xpp_get_environment");
+                        && listResp.Contains("xpp_get_environment")
+                        && listResp.Contains("xpp_list_model_objects")
+                        && listResp.Contains("xpp_get_form_layout");
                     sb.AppendLine("ToolsList: " + (listOk ? "OK" : "FAILED")
                         + (listOk && !hasAllTools ? " (missing tools — outdated server, will restart)" : ""));
 

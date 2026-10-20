@@ -12,7 +12,7 @@ namespace XppAiCopilotCompanion
         {
             Title = title;
             Width = 500;
-            Height = 180;
+            SizeToContent = SizeToContent.Height;
             WindowStartupLocation = WindowStartupLocation.CenterOwner;
             ResizeMode = ResizeMode.NoResize;
 

@@ -42,8 +42,10 @@ Discovery and context:
 - xpp_get_model_info
 - xpp_find_object
 - xpp_list_objects
+- xpp_list_model_objects
 - xpp_find_references
 - xpp_get_object_type_schema
+- xpp_get_form_layout (survey a form with all extensions merged before placing form-extension controls)
 
 Metadata CRUD:
 - xpp_read_object
@@ -91,15 +93,18 @@ Copilot must not:
 ## Fast Search and Impact Pattern
 
 Always prefer this two-step pattern:
-1. Locate target object with xpp_find_object or xpp_list_objects.
+1. Locate the specific target object with xpp_find_object (exactMatch=true when the name is known).
 2. Expand context with:
    - xpp_find_references for usage graph
-   - xpp_list_objects filtered by modelName for local related objects
+   - xpp_read_object on the specific related objects you need
 
-Performance guidance:
-- Provide objectType whenever known.
-- Use bounded maxResults and increase only when needed.
-- Avoid global broad scans once model context is known.
+Performance guidance (discovery runs on the Visual Studio UI thread; broad queries freeze VS):
+- Work on one object, or a handful (max ~5), per tool call.
+- Always provide objectType; it is required with modelName.
+- Use specific names of at least 3 characters; never single letters or generic fragments.
+- Keep maxResults at 1-10 (hard cap 50).
+- Never use xpp_find_object or xpp_list_objects to enumerate a model, package, or object type. Use xpp_list_model_objects instead (counts per type first, then one type at a time with offset/limit).
+- If a result is marked PARTIAL or times out, narrow the query instead of repeating or broadening it.
 
 ## Required Execution Workflow
 

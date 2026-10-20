@@ -6,7 +6,9 @@ using System.Reflection;
 using System.Text;
 using System.Web.Script.Serialization;
 using Microsoft.Dynamics.AX.Metadata.MetaModel;
+using Microsoft.Dynamics.AX.Metadata.Core.Collections;
 using Microsoft.Dynamics.AX.Metadata.Core.MetaModel;
+using Microsoft.Dynamics.AX.Metadata.Providers;
 using Microsoft.Dynamics.AX.Metadata.Service;
 using Microsoft.Dynamics.AX.Framework.Xlnt.XReference;
 using Microsoft.Dynamics.Framework.Tools.Extensibility;
@@ -24,7 +26,7 @@ namespace XppAiCopilotCompanion.MetaModel
     /// All metadata operations use strongly-typed APIs — no raw XML manipulation.
     /// Must be called from the VS main thread (or marshalled to it).
     /// </summary>
-    public sealed class MetaModelBridge : IMetaModelBridge
+    public sealed partial class MetaModelBridge : IMetaModelBridge
     {
         private IMetaModelService _metaService;
         private IMetaModelProviders _metaProviders;
@@ -68,6 +70,10 @@ namespace XppAiCopilotCompanion.MetaModel
             }
         }
 
+        // IMetaModelService can only read extensions; extension writes go through the metadata provider.
+        private IMetadataProvider MetadataProvider =>
+            MetaService != null ? _metaProviders?.CurrentMetadataProvider : null;
+
         private DTE2 Dte =>
             CoreUtility.ServiceProvider.GetService(typeof(DTE)) as DTE2;
 
@@ -86,6 +92,16 @@ namespace XppAiCopilotCompanion.MetaModel
                 case "AxQuery":
                 case "AxDataEntityView":
                 case "AxMenu":
+                case "AxTableExtension":
+                case "AxEnumExtension":
+                case "AxEdtExtension":
+                case "AxFormExtension":
+                case "AxSecurityPrivilege":
+                case "AxSecurityDuty":
+                case "AxSecurityRole":
+                case "AxSecurityDutyExtension":
+                case "AxSecurityRoleExtension":
+                case "AxDataEntityViewExtension":
                     return true;
                 default:
                     return false;
@@ -104,6 +120,9 @@ namespace XppAiCopilotCompanion.MetaModel
 
             try
             {
+                string preError = PreValidateCreate(request);
+                if (preError != null) return Fail(preError);
+
                 MetaModelResult result;
                 switch (request.ObjectType)
                 {
@@ -126,6 +145,13 @@ namespace XppAiCopilotCompanion.MetaModel
                     case "AxMenu":           result = CreateMenu(request, saveInfo); break;
                     case "AxTile":           result = CreateTile(request, saveInfo); break;
                     case "AxConfigurationKey": result = CreateConfigurationKey(request, saveInfo); break;
+                    case "AxTableExtension": result = CreateTableExtension(request, saveInfo); break;
+                    case "AxEnumExtension":  result = CreateEnumExtension(request, saveInfo); break;
+                    case "AxEdtExtension":   result = CreateEdtExtension(request, saveInfo); break;
+                    case "AxFormExtension":  result = CreateFormExtension(request, saveInfo); break;
+                    case "AxSecurityDutyExtension": result = CreateSecurityDutyExtension(request, saveInfo); break;
+                    case "AxSecurityRoleExtension": result = CreateSecurityRoleExtension(request, saveInfo); break;
+                    case "AxDataEntityViewExtension": result = CreateDataEntityViewExtension(request, saveInfo); break;
 
                     default:
                         result = Fail("Unsupported object type: " + request.ObjectType); break;
@@ -147,6 +173,11 @@ namespace XppAiCopilotCompanion.MetaModel
                             return Fail("Created blank " + request.ObjectType + " '"
                                 + request.ObjectName + "' but metadata apply failed: "
                                 + updateResult.Message);
+
+                        // Keep the update's report (e.g. form placement verification) visible to the caller.
+                        int reportStart = updateResult.Message?.IndexOf('\n') ?? -1;
+                        if (reportStart >= 0)
+                            result.Message += updateResult.Message.Substring(reportStart);
                     }
                 }
                 return result;
@@ -186,6 +217,26 @@ namespace XppAiCopilotCompanion.MetaModel
                         result = UpdateDataEntityView(request); break;
                     case "AxMenu":
                         result = UpdateMenu(request); break;
+                    case "AxTableExtension":
+                        result = UpdateTableExtension(request); break;
+                    case "AxEnumExtension":
+                        result = UpdateEnumExtension(request); break;
+                    case "AxEdtExtension":
+                        result = UpdateEdtExtension(request); break;
+                    case "AxFormExtension":
+                        result = UpdateFormExtension(request); break;
+                    case "AxSecurityPrivilege":
+                        result = UpdateSecurityPrivilege(request); break;
+                    case "AxSecurityDuty":
+                        result = UpdateSecurityDuty(request); break;
+                    case "AxSecurityRole":
+                        result = UpdateSecurityRole(request); break;
+                    case "AxSecurityDutyExtension":
+                        result = UpdateSecurityDutyExtension(request); break;
+                    case "AxSecurityRoleExtension":
+                        result = UpdateSecurityRoleExtension(request); break;
+                    case "AxDataEntityViewExtension":
+                        result = UpdateDataEntityViewExtension(request); break;
                     default:
                         result = UpdateGenericByTypedApi(request); break;
                 }
@@ -238,10 +289,10 @@ namespace XppAiCopilotCompanion.MetaModel
                             foreach (var m in tbl.Methods)
                                 result.Methods.Add(new MethodInfo { Name = m.Name, Source = m.Source });
                         result.Properties = ExtractProperties(tbl);
-                        result.Fields = ExtractFields(tbl);
-                        result.Indexes = ExtractIndexes(tbl);
-                        result.FieldGroups = ExtractFieldGroups(tbl);
-                        result.Relations = ExtractRelations(tbl);
+                        result.Fields = ExtractFields(tbl.Fields);
+                        result.Indexes = ExtractIndexes(tbl.Indexes);
+                        result.FieldGroups = ExtractFieldGroups(tbl.FieldGroups);
+                        result.Relations = ExtractRelations(tbl.Relations);
                         result.TypedMetadataJson = BuildTypedMetadataJson(objectType, tbl);
                         result.ModelName = GetObjectModelName(objectType, objectName);
                         break;
@@ -262,7 +313,7 @@ namespace XppAiCopilotCompanion.MetaModel
                         var enm = MetaService.GetEnum(objectName);
                         if (enm == null) return new ReadObjectResult { Message = "Enum '" + objectName + "' not found." };
                         result.Properties = ExtractProperties(enm);
-                        result.EnumValues = ExtractEnumValues(enm);
+                        result.EnumValues = ExtractEnumValues(enm.EnumValues);
                         result.TypedMetadataJson = BuildTypedMetadataJson(objectType, enm);
                         result.ModelName = GetObjectModelName(objectType, objectName);
                         break;
@@ -340,6 +391,7 @@ namespace XppAiCopilotCompanion.MetaModel
                         var priv = MetaService.GetSecurityPrivilege(objectName);
                         if (priv == null) return new ReadObjectResult { Message = "SecurityPrivilege '" + objectName + "' not found." };
                         PopulateReadResultFromGenericObject(result, objectType, priv);
+                        result.EntryPoints = ExtractEntryPoints(priv);
                         result.ModelName = GetObjectModelName(objectType, objectName);
                         break;
 
@@ -385,12 +437,57 @@ namespace XppAiCopilotCompanion.MetaModel
                         result.ModelName = GetObjectModelName(objectType, objectName);
                         break;
 
+                    case "AxTableExtension":
+                        var tblExt = MetaService.GetTableExtension(objectName);
+                        if (tblExt == null) return new ReadObjectResult { Message = "TableExtension '" + objectName + "' not found." };
+                        result.Properties = ExtractPropertyModifications(tblExt.PropertyModifications);
+                        result.Fields = ExtractFields(tblExt.Fields);
+                        result.Indexes = ExtractIndexes(tblExt.Indexes);
+                        result.FieldGroups = ExtractFieldGroups(tblExt.FieldGroups);
+                        result.Relations = ExtractRelations(tblExt.Relations);
+                        result.TypedMetadataJson = BuildTypedMetadataJson(objectType, tblExt);
+                        result.ModelName = GetObjectModelName(objectType, objectName);
+                        break;
+
+                    case "AxEnumExtension":
+                        var enmExt = MetaService.GetEnumExtension(objectName);
+                        if (enmExt == null) return new ReadObjectResult { Message = "EnumExtension '" + objectName + "' not found." };
+                        result.Properties = ExtractPropertyModifications(enmExt.PropertyModifications);
+                        result.EnumValues = ExtractEnumValues(enmExt.EnumValues);
+                        result.TypedMetadataJson = BuildTypedMetadataJson(objectType, enmExt);
+                        result.ModelName = GetObjectModelName(objectType, objectName);
+                        break;
+
+                    case "AxEdtExtension":
+                        var edtExt = MetaService.GetEdtExtension(objectName);
+                        if (edtExt == null) return new ReadObjectResult { Message = "EdtExtension '" + objectName + "' not found." };
+                        result.Properties = ExtractPropertyModifications(edtExt.PropertyModifications);
+                        result.TypedMetadataJson = BuildTypedMetadataJson(objectType, edtExt);
+                        result.ModelName = GetObjectModelName(objectType, objectName);
+                        break;
+
+                    case "AxFormExtension":
+                        var frmExt = MetaService.GetFormExtension(objectName);
+                        if (frmExt == null) return new ReadObjectResult { Message = "FormExtension '" + objectName + "' not found." };
+                        result.Properties = ExtractPropertyModifications(frmExt.PropertyModifications);
+                        result.DataSources = ExtractFormExtensionDataSources(frmExt);
+                        result.Controls = ExtractFormExtensionControls(frmExt);
+                        result.ControlModifications = ExtractControlModifications(frmExt);
+                        result.TypedMetadataJson = BuildTypedMetadataJson(objectType, frmExt);
+                        result.ModelName = GetObjectModelName(objectType, objectName);
+                        break;
+
                     default:
-                        return new ReadObjectResult
-                        {
-                            Message = "Unsupported object type for read: '" + objectType
-                                + "'. No IMetaModelService API is available for this type."
-                        };
+                        var generic = ReadViaMetadataProvider(objectType, objectName, out string genericModel);
+                        if (generic == null)
+                            return new ReadObjectResult
+                            {
+                                Message = objectType + " '" + objectName + "' not found, or '" + objectType
+                                    + "' is not a D365FO metadata type. Check the type and name with xpp_find_object."
+                            };
+                        PopulateReadResultFromGenericObject(result, objectType, generic);
+                        result.ModelName = genericModel ?? GetObjectModelName(objectType, objectName);
+                        break;
                 }
 
                 result.IsCustom = IsCustomModel(result.ModelName);
@@ -431,6 +528,33 @@ namespace XppAiCopilotCompanion.MetaModel
 
 
 
+
+        // Every IMetadataProvider sub-provider has Read(string) returning its Ax type; find the one for objectType.
+        private object ReadViaMetadataProvider(string objectType, string objectName, out string modelName)
+        {
+            modelName = null;
+            var provider = MetadataProvider;
+            if (provider == null || string.IsNullOrEmpty(objectType)) return null;
+
+            foreach (var prop in typeof(IMetadataProvider).GetProperties())
+            {
+                var read = prop.PropertyType.GetMethod("Read", new[] { typeof(string) })
+                    ?? prop.PropertyType.GetInterfaces().Select(i => i.GetMethod("Read", new[] { typeof(string) })).FirstOrDefault(m => m != null);
+                if (read == null || !string.Equals(read.ReturnType.Name, objectType, StringComparison.OrdinalIgnoreCase))
+                    continue;
+
+                object subProvider = prop.GetValue(provider);
+                if (subProvider == null) return null;
+                object axObj = read.Invoke(subProvider, new object[] { objectName });
+                if (axObj == null) return null;
+
+                var getModelInfo = subProvider.GetType().GetMethod("GetModelInfo", new[] { typeof(string) });
+                if (getModelInfo?.Invoke(subProvider, new object[] { objectName }) is System.Collections.IEnumerable models)
+                    modelName = models.OfType<ModelInfo>().FirstOrDefault()?.Name;
+                return axObj;
+            }
+            return null;
+        }
 
         private static void PopulateReadResultFromGenericObject(ReadObjectResult result, string objectType, object axObj)
         {
@@ -881,8 +1005,7 @@ namespace XppAiCopilotCompanion.MetaModel
                     if (!string.IsNullOrEmpty(ep.ObjectName) &&
                         !string.Equals(ep.ObjectName, actual.ObjectName, StringComparison.OrdinalIgnoreCase))
                         mismatches.Add("EntryPoint '" + ep.Name + "'.ObjectName: expected '" + ep.ObjectName + "', actual '" + (actual.ObjectName ?? "") + "'");
-                    if (!string.IsNullOrEmpty(ep.Grant) &&
-                        !string.Equals(ep.Grant, actual.Grant, StringComparison.OrdinalIgnoreCase))
+                    if (!string.IsNullOrEmpty(ep.Grant) && !GrantsEqual(ep.Grant, actual.Grant))
                         mismatches.Add("EntryPoint '" + ep.Name + "'.Grant: expected '" + ep.Grant + "', actual '" + (actual.Grant ?? "") + "'");
                 }
             }
@@ -890,6 +1013,22 @@ namespace XppAiCopilotCompanion.MetaModel
             if (req.DataSources != null)
             {
                 ValidateDataSources(req.DataSources, readResult.DataSources, "", mismatches);
+            }
+
+            if (req.Controls != null)
+            {
+                var actualControls = new Dictionary<string, FormControlDto>(StringComparer.OrdinalIgnoreCase);
+                FlattenControls(readResult.Controls, actualControls);
+                var expectedControls = new Dictionary<string, FormControlDto>(StringComparer.OrdinalIgnoreCase);
+                FlattenControls(req.Controls, expectedControls);
+                foreach (var exp in expectedControls.Values)
+                {
+                    if (!actualControls.TryGetValue(exp.Name, out var act))
+                        mismatches.Add("Control '" + exp.Name + "': expected to exist, not found");
+                    else if (!string.IsNullOrEmpty(exp.DataField)
+                        && !string.Equals(exp.DataField, act.DataField, StringComparison.OrdinalIgnoreCase))
+                        mismatches.Add("Control '" + exp.Name + "'.DataField: expected '" + exp.DataField + "', actual '" + (act.DataField ?? "") + "'");
+                }
             }
 
             result.Mismatches = mismatches;
@@ -1041,6 +1180,13 @@ namespace XppAiCopilotCompanion.MetaModel
 
         // ── Discovery ──
 
+        // Scans run on the VS UI thread; must stay well under the bridge's 12s dispatch timeout.
+        private const int SearchTimeBudgetMs = 6000;
+
+        private static string BudgetExceededMessage(int found) =>
+            "Search stopped after " + (SearchTimeBudgetMs / 1000) + "s with " + found
+            + " result(s); results are PARTIAL. Narrow the search: pass objectType and a longer, more specific name.";
+
         public FindObjectResult FindObject(string objectName, string objectType, bool exactMatch, int maxResults)
         {
             ThreadHelper.ThrowIfNotOnUIThread();
@@ -1048,6 +1194,8 @@ namespace XppAiCopilotCompanion.MetaModel
                 return new FindObjectResult { Message = "MetaModel service not available." };
 
             var result = new FindObjectResult { Success = true };
+            var sw = System.Diagnostics.Stopwatch.StartNew();
+            bool budgetExceeded = false;
 
             try
             {
@@ -1058,6 +1206,12 @@ namespace XppAiCopilotCompanion.MetaModel
                     {
                         foreach (string name in searcher.GetNames())
                         {
+                            if (sw.ElapsedMilliseconds > SearchTimeBudgetMs)
+                            {
+                                budgetExceeded = true;
+                                break;
+                            }
+
                             bool match = exactMatch
                                 ? name.Equals(objectName, StringComparison.OrdinalIgnoreCase)
                                 : name.IndexOf(objectName, StringComparison.OrdinalIgnoreCase) >= 0;
@@ -1076,7 +1230,7 @@ namespace XppAiCopilotCompanion.MetaModel
                                 if (result.Matches.Count >= maxResults) break;
                             }
                         }
-                        if (result.Matches.Count >= maxResults) break;
+                        if (result.Matches.Count >= maxResults || budgetExceeded) break;
                     }
                     catch (Exception typeEx)
                     {
@@ -1092,10 +1246,11 @@ namespace XppAiCopilotCompanion.MetaModel
                 result.Message = "Search error in FindObject (searching for '" + objectName + "' in type '" + objectType + "'): " + svcContext + " - " + ex.Message;
             }
 
-            if (result.Matches.Count == 0)
+            if (budgetExceeded)
+                result.Message = BudgetExceededMessage(result.Matches.Count);
+            else if (result.Matches.Count == 0)
                 result.Message = "No objects found matching '" + objectName + "'."
-                    + (string.IsNullOrEmpty(objectType) ? "" : " (type: " + objectType + ")")
-                    + " Found in " + result.Matches.Count + " type(s).";
+                    + (string.IsNullOrEmpty(objectType) ? "" : " (type: " + objectType + ")");
 
             return result;
         }
@@ -1109,6 +1264,8 @@ namespace XppAiCopilotCompanion.MetaModel
             var result = new ListObjectsResult { Success = true };
             bool hasNameFilter = !string.IsNullOrEmpty(nameFilter);
             bool hasModelFilter = !string.IsNullOrEmpty(modelName);
+            var sw = System.Diagnostics.Stopwatch.StartNew();
+            bool budgetExceeded = false;
 
             try
             {
@@ -1117,6 +1274,12 @@ namespace XppAiCopilotCompanion.MetaModel
                 {
                     foreach (string name in searcher.GetNames())
                     {
+                        if (sw.ElapsedMilliseconds > SearchTimeBudgetMs)
+                        {
+                            budgetExceeded = true;
+                            break;
+                        }
+
                         // Apply cheap name filter FIRST to avoid expensive model lookups
                         if (hasNameFilter &&
                             name.IndexOf(nameFilter, StringComparison.OrdinalIgnoreCase) < 0)
@@ -1145,13 +1308,16 @@ namespace XppAiCopilotCompanion.MetaModel
 
                         if (result.Objects.Count >= maxResults) break;
                     }
-                    if (result.Objects.Count >= maxResults) break;
+                    if (result.Objects.Count >= maxResults || budgetExceeded) break;
                 }
             }
             catch (Exception ex)
             {
                 result.Message = "List error: " + ex.Message;
             }
+
+            if (budgetExceeded)
+                result.Message = BudgetExceededMessage(result.Objects.Count);
 
             return result;
         }
@@ -1564,8 +1730,21 @@ namespace XppAiCopilotCompanion.MetaModel
                 if (metadataType == null)
                     return Fail("Unsupported object type for project add: " + objectType);
 
+                // D365FO projects belong to one model; adding another model's objects causes build/designer errors.
+                var projectModel = projectNode.GetProjectsModelInfo();
+                string objectModel = GetObjectModelName(objectType, objectName);
+                if (projectModel != null && !string.IsNullOrEmpty(objectModel)
+                    && !string.Equals(projectModel.Name, objectModel, StringComparison.OrdinalIgnoreCase))
+                {
+                    return Fail(objectType + " '" + objectName + "' belongs to model '" + objectModel
+                        + "', but the active project targets model '" + projectModel.Name
+                        + "'. Not added. Ask the user to set the project's Model property to '" + objectModel
+                        + "' or open a project for that model.");
+                }
+
                 var reference = new MetadataReference(objectName, metadataType);
                 projectNode.AddModelElementsToProject(new[] { reference });
+                InvalidateCaches();
 
                 return new MetaModelResult
                 {
@@ -1755,25 +1934,19 @@ namespace XppAiCopilotCompanion.MetaModel
 
         private MetaModelResult CreateSecurityPrivilege(CreateObjectRequest req, ModelSaveInfo saveInfo)
         {
-            var priv = new AxSecurityPrivilege { Name = req.ObjectName };
-            ApplyTypedMetadata(priv, req);
-            MetaService.CreateSecurityPrivilege(priv, saveInfo);
+            MetaService.CreateSecurityPrivilege(new AxSecurityPrivilege { Name = req.ObjectName }, saveInfo);
             return Ok("Created AxSecurityPrivilege '" + req.ObjectName + "'.");
         }
 
         private MetaModelResult CreateSecurityDuty(CreateObjectRequest req, ModelSaveInfo saveInfo)
         {
-            var duty = new AxSecurityDuty { Name = req.ObjectName };
-            ApplyTypedMetadata(duty, req);
-            MetaService.CreateSecurityDuty(duty, saveInfo);
+            MetaService.CreateSecurityDuty(new AxSecurityDuty { Name = req.ObjectName }, saveInfo);
             return Ok("Created AxSecurityDuty '" + req.ObjectName + "'.");
         }
 
         private MetaModelResult CreateSecurityRole(CreateObjectRequest req, ModelSaveInfo saveInfo)
         {
-            var role = new AxSecurityRole { Name = req.ObjectName };
-            ApplyTypedMetadata(role, req);
-            MetaService.CreateSecurityRole(role, saveInfo);
+            MetaService.CreateSecurityRole(new AxSecurityRole { Name = req.ObjectName }, saveInfo);
             return Ok("Created AxSecurityRole '" + req.ObjectName + "'.");
         }
 
@@ -1813,6 +1986,139 @@ namespace XppAiCopilotCompanion.MetaModel
             ApplyTypedMetadata(key, req);
             MetaService.CreateConfigurationKey(key, saveInfo);
             return Ok("Created AxConfigurationKey '" + req.ObjectName + "'.");
+        }
+
+        // ── Private helpers: Extension operations ──
+
+        private MetaModelResult CreateTableExtension(CreateObjectRequest req, ModelSaveInfo saveInfo)
+        {
+            string error = ValidateNewExtension(req, "AxTable",
+                baseName => MetaService.GetTable(baseName) != null,
+                () => MetadataProvider.TableExtensions.Exists(req.ObjectName));
+            if (error != null) return Fail(error);
+
+            MetadataProvider.TableExtensions.Create(new AxTableExtension { Name = req.ObjectName }, saveInfo);
+            return Ok("Created AxTableExtension '" + req.ObjectName + "'.");
+        }
+
+        private MetaModelResult CreateEnumExtension(CreateObjectRequest req, ModelSaveInfo saveInfo)
+        {
+            string error = ValidateNewExtension(req, "AxEnum",
+                baseName => MetaService.GetEnum(baseName) != null,
+                () => MetadataProvider.EnumExtensions.Exists(req.ObjectName));
+            if (error != null) return Fail(error);
+
+            MetadataProvider.EnumExtensions.Create(new AxEnumExtension { Name = req.ObjectName }, saveInfo);
+            return Ok("Created AxEnumExtension '" + req.ObjectName + "'.");
+        }
+
+        private MetaModelResult CreateEdtExtension(CreateObjectRequest req, ModelSaveInfo saveInfo)
+        {
+            string error = ValidateNewExtension(req, "AxEdt",
+                baseName => MetaService.GetExtendedDataType(baseName) != null,
+                () => MetadataProvider.EdtExtensions.Exists(req.ObjectName));
+            if (error != null) return Fail(error);
+
+            MetadataProvider.EdtExtensions.Create(new AxEdtExtension { Name = req.ObjectName }, saveInfo);
+            return Ok("Created AxEdtExtension '" + req.ObjectName + "'.");
+        }
+
+        private MetaModelResult UpdateTableExtension(UpdateObjectRequest req)
+        {
+            var ext = MetaService.GetTableExtension(req.ObjectName);
+            if (ext == null)
+                return Fail("TableExtension '" + req.ObjectName + "' not found.");
+
+            var saveInfo = GetExtensionSaveInfo("AxTableExtension", req.ObjectName, out string error);
+            if (saveInfo == null) return Fail(error);
+
+            ApplyTypedMetadata(ext, req);
+            MetadataProvider.TableExtensions.Update(ext, saveInfo);
+            return Ok("Updated AxTableExtension '" + req.ObjectName + "'.");
+        }
+
+        private MetaModelResult UpdateEnumExtension(UpdateObjectRequest req)
+        {
+            var ext = MetaService.GetEnumExtension(req.ObjectName);
+            if (ext == null)
+                return Fail("EnumExtension '" + req.ObjectName + "' not found.");
+
+            var saveInfo = GetExtensionSaveInfo("AxEnumExtension", req.ObjectName, out string error);
+            if (saveInfo == null) return Fail(error);
+
+            ApplyTypedMetadata(ext, req);
+            MetadataProvider.EnumExtensions.Update(ext, saveInfo);
+            return Ok("Updated AxEnumExtension '" + req.ObjectName + "'.");
+        }
+
+        private MetaModelResult UpdateEdtExtension(UpdateObjectRequest req)
+        {
+            var ext = MetaService.GetEdtExtension(req.ObjectName);
+            if (ext == null)
+                return Fail("EdtExtension '" + req.ObjectName + "' not found.");
+
+            var saveInfo = GetExtensionSaveInfo("AxEdtExtension", req.ObjectName, out string error);
+            if (saveInfo == null) return Fail(error);
+
+            ApplyTypedMetadata(ext, req);
+            MetadataProvider.EdtExtensions.Update(ext, saveInfo);
+            return Ok("Updated AxEdtExtension '" + req.ObjectName + "'.");
+        }
+
+        private string ValidateNewExtension(CreateObjectRequest req, string baseType,
+            Func<string, bool> baseExists, Func<bool> extensionExists)
+        {
+            if (MetadataProvider == null)
+                return "D365FO metadata provider not available; cannot create extensions.";
+
+            int dot = req.ObjectName.IndexOf('.');
+            if (dot <= 0 || dot == req.ObjectName.Length - 1)
+                return req.ObjectType + " name must be '<Base" + baseType.Substring(2)
+                    + ">.<Suffix>' (e.g. CustTable.MyModelExtension).";
+
+            string baseName = req.ObjectName.Substring(0, dot);
+            if (!baseExists(baseName))
+                return baseType + " '" + baseName + "' not found. The part before '.' must be the name of the object being extended.";
+
+            if (extensionExists())
+                return req.ObjectType + " '" + req.ObjectName + "' already exists. Use xpp_update_object to change it.";
+
+            string targetModel = ResolveTargetModelName(req.ModelName);
+            if (!IsCustomModel(targetModel))
+                return "Extensions must be created in a custom model; '" + (targetModel ?? "<unresolved>")
+                    + "' is not one. Pass modelName of your own model.";
+
+            return null;
+        }
+
+        private ModelSaveInfo GetExtensionSaveInfo(string objectType, string objectName, out string error)
+        {
+            error = null;
+            if (MetadataProvider == null)
+            {
+                error = "D365FO metadata provider not available; cannot update extensions.";
+                return null;
+            }
+
+            string modelName = GetObjectModelName(objectType, objectName);
+            if (string.IsNullOrEmpty(modelName))
+            {
+                error = "Cannot resolve model for '" + objectName + "'.";
+                return null;
+            }
+
+            // Extensions shipped in standard models are not ours to change.
+            if (!IsCustomModel(modelName))
+            {
+                error = objectType + " '" + objectName + "' belongs to standard model '" + modelName
+                    + "' and cannot be changed. Create your own extension in a custom model.";
+                return null;
+            }
+
+            var saveInfo = GetModelSaveInfo(modelName);
+            if (saveInfo == null)
+                error = "Cannot resolve model for '" + objectName + "'.";
+            return saveInfo;
         }
 
         // ── Private helpers: Update operations ──
@@ -1972,7 +2278,9 @@ namespace XppAiCopilotCompanion.MetaModel
         private MetaModelResult UpdateGenericByTypedApi(UpdateObjectRequest req)
         {
             return Fail("Update for type '" + req.ObjectType + "' is not yet supported via the typed API. "
-                + "Supported types: AxClass, AxTable, AxForm, AxEdt, AxEnum, AxView, AxQuery, AxDataEntityView, AxMenu.");
+                + "Supported types: AxClass, AxTable, AxForm, AxEdt, AxEnum, AxView, AxQuery, AxDataEntityView, AxMenu, "
+                + "AxSecurityPrivilege, AxSecurityDuty, AxSecurityRole, AxTableExtension, AxEnumExtension, AxEdtExtension, "
+                + "AxFormExtension, AxDataEntityViewExtension, AxSecurityDutyExtension, AxSecurityRoleExtension.");
         }
 
         // ── Utility methods ──
@@ -2088,6 +2396,20 @@ namespace XppAiCopilotCompanion.MetaModel
             return null;
         }
 
+        private string ResolveTargetModelName(string modelName)
+        {
+            ThreadHelper.ThrowIfNotOnUIThread();
+
+            if (!string.IsNullOrEmpty(modelName))
+            {
+                var info = MetaService.GetModel(modelName);
+                if (info != null)
+                    return info.Name;
+            }
+
+            return GetActiveProjectNode()?.GetProjectsModelInfo()?.Name;
+        }
+
         private ModelSaveInfo GetModelSaveInfoForObject(string objectType, string objectName)
         {
             string modelName = GetObjectModelName(objectType, objectName);
@@ -2159,7 +2481,10 @@ namespace XppAiCopilotCompanion.MetaModel
                     if (modelInfo != null) break;
                 }
 
+                // The service has no model lookup for some types (e.g. data entity extensions); every provider does.
                 string modelName = modelInfo?.Name;
+                if (modelName == null)
+                    ReadViaMetadataProvider(objectType, objectName, out modelName);
                 
                 // Cache the result
                 _objectModelNameCache[cacheKey] = new CachedModelName
@@ -2217,6 +2542,10 @@ namespace XppAiCopilotCompanion.MetaModel
                 case "AxService": return typeof(AxService);
                 case "AxServiceGroup": return typeof(AxServiceGroup);
                 case "AxConfigurationKey": return typeof(AxConfigurationKey);
+                case "AxTableExtension": return typeof(AxTableExtension);
+                case "AxEnumExtension": return typeof(AxEnumExtension);
+                case "AxEdtExtension": return typeof(AxEdtExtension);
+                case "AxFormExtension": return typeof(AxFormExtension);
 
                 default: return null;
             }
@@ -2273,11 +2602,11 @@ namespace XppAiCopilotCompanion.MetaModel
             }
         }
 
-        private static void ApplyEnumValues(AxEnum axEnum, List<EnumValueDto> values)
+        private static void ApplyEnumValues(KeyedObjectCollection<AxEnumValue> target, List<EnumValueDto> values)
         {
             if (values == null) return;
             int autoValue = 0;
-            foreach (var existing in axEnum.EnumValues)
+            foreach (var existing in target)
             {
                 if (existing.Value >= autoValue)
                     autoValue = existing.Value + 1;
@@ -2285,15 +2614,15 @@ namespace XppAiCopilotCompanion.MetaModel
             foreach (var dto in values)
             {
                 if (string.IsNullOrWhiteSpace(dto.Name)) continue;
-                if (axEnum.EnumValues.Contains(dto.Name)) continue;
+                if (target.Contains(dto.Name)) continue;
                 var ev = new AxEnumValue { Name = dto.Name, Value = dto.Value };
                 if (!string.IsNullOrEmpty(dto.Label))
                     ev.Label = dto.Label;
-                axEnum.EnumValues.Add(ev);
+                target.Add(ev);
             }
         }
 
-        private static void ApplyFields(AxTable tbl, List<FieldDto> fields)
+        private static void ApplyFields(KeyedObjectCollection<AxTableField> target, List<FieldDto> fields)
         {
             if (fields == null) return;
             foreach (var f in fields)
@@ -2323,11 +2652,11 @@ namespace XppAiCopilotCompanion.MetaModel
                 }
                 if (axField is AxTableFieldEnum enumField && !string.IsNullOrEmpty(f.EnumType))
                     enumField.EnumType = f.EnumType;
-                tbl.Fields.Add(axField);
+                target.Add(axField);
             }
         }
 
-        private static void ApplyIndexes(AxTable tbl, List<IndexDto> indexes)
+        private static void ApplyIndexes(KeyedObjectCollection<AxTableIndex> target, List<IndexDto> indexes)
         {
             if (indexes == null) return;
             foreach (var idx in indexes)
@@ -2337,11 +2666,11 @@ namespace XppAiCopilotCompanion.MetaModel
                 if (idx.Fields != null)
                     foreach (string fieldName in idx.Fields)
                         axIdx.Fields.Add(new AxTableIndexField { Name = fieldName, DataField = fieldName });
-                tbl.Indexes.Add(axIdx);
+                target.Add(axIdx);
             }
         }
 
-        private static void ApplyFieldGroups(AxTable tbl, List<FieldGroupDto> groups)
+        private static void ApplyFieldGroups(KeyedObjectCollection<AxTableFieldGroup> target, List<FieldGroupDto> groups)
         {
             if (groups == null) return;
             foreach (var fg in groups)
@@ -2353,11 +2682,11 @@ namespace XppAiCopilotCompanion.MetaModel
                 if (fg.Fields != null)
                     foreach (string fieldName in fg.Fields)
                         axFg.Fields.Add(new AxTableFieldGroupField { Name = fieldName, DataField = fieldName });
-                tbl.FieldGroups.Add(axFg);
+                target.Add(axFg);
             }
         }
 
-        private static void ApplyRelations(AxTable tbl, List<RelationDto> relations)
+        private static void ApplyRelations(KeyedObjectCollection<AxTableRelation> target, List<RelationDto> relations)
         {
             if (relations == null) return;
             foreach (var rel in relations)
@@ -2378,39 +2707,34 @@ namespace XppAiCopilotCompanion.MetaModel
                         });
                     }
                 }
-                tbl.Relations.Add(axRel);
+                target.Add(axRel);
             }
         }
 
-        private static void ApplyEntryPoints(object secObj, List<EntryPointDto> entryPoints)
+        // Extensions cannot set base-object properties directly; D365FO stores them as property modifications.
+        private static bool ApplyPropertyModifications(object target, Dictionary<string, string> props)
         {
-            if (entryPoints == null) return;
-            // Use reflection to access EntryPoints/Privileges collections
-            var epProp = secObj.GetType().GetProperty("EntryPoints");
-            if (epProp != null)
+            KeyedObjectCollection<AxPropertyModification> mods =
+                (target as AxTableExtension)?.PropertyModifications
+                ?? (target as AxEnumExtension)?.PropertyModifications
+                ?? (target as AxEdtExtension)?.PropertyModifications
+                ?? (target as AxFormExtension)?.PropertyModifications
+                ?? (target as AxDataEntityViewExtension)?.PropertyModifications
+                ?? (target as AxSecurityDutyExtension)?.PropertyModifications
+                ?? (target as AxSecurityRoleExtension)?.PropertyModifications;
+            if (mods == null) return false;
+            if (props == null) return true;
+
+            foreach (var kvp in props)
             {
-                var collection = epProp.GetValue(secObj);
-                var addMethod = collection?.GetType().GetMethod("Add");
-                if (addMethod != null)
-                {
-                    foreach (var ep in entryPoints)
-                    {
-                        if (string.IsNullOrEmpty(ep.Name)) continue;
-                        var axEp = new AxSecurityEntryPointReference { Name = ep.Name };
-                        if (!string.IsNullOrEmpty(ep.ObjectName))
-                            axEp.ObjectName = ep.ObjectName;
-                        try
-                        {
-                            if (!string.IsNullOrEmpty(ep.ObjectType))
-                                axEp.ObjectType = (EntryPointType)Enum.Parse(typeof(EntryPointType), ep.ObjectType, true);
-                        }
-                        catch { }
-                        if (!string.IsNullOrEmpty(ep.Grant))
-                            TrySetPropertyValue(axEp, ep.Grant, "Grant");
-                        addMethod.Invoke(collection, new object[] { axEp });
-                    }
-                }
+                if (string.IsNullOrWhiteSpace(kvp.Key)) continue;
+                var existing = mods.FirstOrDefault(m => string.Equals(m.Name, kvp.Key, StringComparison.OrdinalIgnoreCase));
+                if (existing != null)
+                    existing.Value = kvp.Value;
+                else
+                    mods.Add(new AxPropertyModification { Name = kvp.Key, Value = kvp.Value });
             }
+            return true;
         }
 
         private void ApplyTypedMetadata(object target, CreateObjectRequest req)
@@ -2424,20 +2748,30 @@ namespace XppAiCopilotCompanion.MetaModel
             // Apply structural changes FIRST so reference properties (ClusterIndex,
             // PrimaryIndex, etc.) find their targets when set in the properties pass.
             if (target is AxEnum axEnum)
-                ApplyEnumValues(axEnum, req.EnumValues);
+                ApplyEnumValues(axEnum.EnumValues, req.EnumValues);
+            if (target is AxEnumExtension enumExt)
+                ApplyEnumValues(enumExt.EnumValues, req.EnumValues);
             if (target is AxTable axTable)
             {
-                ApplyFields(axTable, req.Fields);
-                ApplyIndexes(axTable, req.Indexes);
-                ApplyFieldGroups(axTable, req.FieldGroups);
-                ApplyRelations(axTable, req.Relations);
+                ApplyFields(axTable.Fields, req.Fields);
+                ApplyIndexes(axTable.Indexes, req.Indexes);
+                ApplyFieldGroups(axTable.FieldGroups, req.FieldGroups);
+                ApplyRelations(axTable.Relations, req.Relations);
+            }
+            if (target is AxTableExtension tableExt)
+            {
+                ApplyFields(tableExt.Fields, req.Fields);
+                ApplyIndexes(tableExt.Indexes, req.Indexes);
+                ApplyFieldGroups(tableExt.FieldGroups, req.FieldGroups);
+                ApplyRelations(tableExt.Relations, req.Relations);
             }
             if (target is AxQuerySimple axQuery)
                 ApplyQueryDataSources(axQuery, req.DataSources);
             ApplyEntryPoints(target, req.EntryPoints);
 
             // Scalar properties last — references to fields/indexes/etc. are now valid.
-            ApplyProperties(target, req.Properties);
+            if (!ApplyPropertyModifications(target, req.Properties))
+                ApplyProperties(target, req.Properties);
         }
 
         private void ApplyTypedMetadata(object target, UpdateObjectRequest req)
@@ -2451,20 +2785,31 @@ namespace XppAiCopilotCompanion.MetaModel
             // Apply structural changes FIRST so reference properties (ClusterIndex,
             // PrimaryIndex, etc.) find their targets when set in the properties pass.
             if (target is AxEnum axEnum)
-                ApplyEnumValues(axEnum, req.EnumValues);
+                ApplyEnumValues(axEnum.EnumValues, req.EnumValues);
+            if (target is AxEnumExtension enumExt)
+                ApplyEnumValues(enumExt.EnumValues, req.EnumValues);
             if (target is AxTable axTable)
             {
-                ApplyFields(axTable, req.Fields);
-                ApplyIndexes(axTable, req.Indexes);
-                ApplyFieldGroups(axTable, req.FieldGroups);
-                ApplyRelations(axTable, req.Relations);
+                ApplyFields(axTable.Fields, req.Fields);
+                ApplyIndexes(axTable.Indexes, req.Indexes);
+                ApplyFieldGroups(axTable.FieldGroups, req.FieldGroups);
+                ApplyRelations(axTable.Relations, req.Relations);
+            }
+            if (target is AxTableExtension tableExt)
+            {
+                ApplyFields(tableExt.Fields, req.Fields);
+                ApplyIndexes(tableExt.Indexes, req.Indexes);
+                ApplyFieldGroups(tableExt.FieldGroups, req.FieldGroups);
+                ApplyRelations(tableExt.Relations, req.Relations);
             }
             if (target is AxQuerySimple axQuery)
                 ApplyQueryDataSources(axQuery, req.DataSources);
             ApplyEntryPoints(target, req.EntryPoints);
+            ApplySecurityReferences(target, req);
 
             // Scalar properties last - references to fields/indexes/etc. are now valid.
-            ApplyProperties(target, req.Properties);
+            if (!ApplyPropertyModifications(target, req.Properties))
+                ApplyProperties(target, req.Properties);
         }
 
         private static void ApplyTypedMetadataGraph(object target, string objectType, string typedMetadataJson)
@@ -3154,20 +3499,30 @@ namespace XppAiCopilotCompanion.MetaModel
             return props;
         }
 
-        private static List<EnumValueDto> ExtractEnumValues(AxEnum enm)
+        private static List<EnumValueDto> ExtractEnumValues(IEnumerable<AxEnumValue> enumValues)
         {
             var result = new List<EnumValueDto>();
-            if (enm?.EnumValues == null) return result;
-            foreach (var v in enm.EnumValues)
+            if (enumValues == null) return result;
+            foreach (var v in enumValues)
                 result.Add(new EnumValueDto { Name = v.Name, Value = v.Value, Label = v.Label });
             return result;
         }
 
-        private static List<FieldDto> ExtractFields(AxTable tbl)
+        private static Dictionary<string, string> ExtractPropertyModifications(IEnumerable<AxPropertyModification> mods)
+        {
+            var result = new Dictionary<string, string>();
+            if (mods == null) return result;
+            foreach (var m in mods)
+                if (!string.IsNullOrEmpty(m.Name))
+                    result[m.Name] = m.Value;
+            return result;
+        }
+
+        private static List<FieldDto> ExtractFields(IEnumerable<AxTableField> fields)
         {
             var result = new List<FieldDto>();
-            if (tbl?.Fields == null) return result;
-            foreach (var f in tbl.Fields)
+            if (fields == null) return result;
+            foreach (var f in fields)
             {
                 string fieldType = f.GetType().Name;
                 if (fieldType.StartsWith("AxTableField"))
@@ -3183,11 +3538,11 @@ namespace XppAiCopilotCompanion.MetaModel
             return result;
         }
 
-        private static List<IndexDto> ExtractIndexes(AxTable tbl)
+        private static List<IndexDto> ExtractIndexes(IEnumerable<AxTableIndex> indexes)
         {
             var result = new List<IndexDto>();
-            if (tbl?.Indexes == null) return result;
-            foreach (var idx in tbl.Indexes)
+            if (indexes == null) return result;
+            foreach (var idx in indexes)
             {
                 var dto = new IndexDto { Name = idx.Name, AllowDuplicates = idx.AllowDuplicates == NoYes.Yes };
                 if (idx.Fields != null)
@@ -3198,11 +3553,11 @@ namespace XppAiCopilotCompanion.MetaModel
             return result;
         }
 
-        private static List<FieldGroupDto> ExtractFieldGroups(AxTable tbl)
+        private static List<FieldGroupDto> ExtractFieldGroups(IEnumerable<AxTableFieldGroup> groups)
         {
             var result = new List<FieldGroupDto>();
-            if (tbl?.FieldGroups == null) return result;
-            foreach (var fg in tbl.FieldGroups)
+            if (groups == null) return result;
+            foreach (var fg in groups)
             {
                 var dto = new FieldGroupDto { Name = fg.Name, Label = fg.Label };
                 if (fg.Fields != null)
@@ -3213,11 +3568,11 @@ namespace XppAiCopilotCompanion.MetaModel
             return result;
         }
 
-        private static List<RelationDto> ExtractRelations(AxTable tbl)
+        private static List<RelationDto> ExtractRelations(IEnumerable<AxTableRelation> relations)
         {
             var result = new List<RelationDto>();
-            if (tbl?.Relations == null) return result;
-            foreach (var rel in tbl.Relations)
+            if (relations == null) return result;
+            foreach (var rel in relations)
             {
                 var dto = new RelationDto { Name = rel.Name, RelatedTable = rel.RelatedTable };
                 if (rel.Constraints != null)
@@ -3438,7 +3793,10 @@ namespace XppAiCopilotCompanion.MetaModel
             };
             foreach (string s in standard)
                 if (lower.Contains(s)) return false;
-            return true;
+
+            // Microsoft/ISV models not covered by the list above are marked Customization=DoNotAllow.
+            var info = MetaService?.GetModel(modelName);
+            return info == null || (!info.Readonly && info.Customization != ModelCustomizationLevel.DoNotAllow);
         }
 
         private static bool IsStandardPackagePath(string filePath)
@@ -3523,20 +3881,21 @@ namespace XppAiCopilotCompanion.MetaModel
 
         // ── Cross-Reference search ──
 
-        public FindReferencesResult FindReferences(string objectType, string objectName, string referenceKind, int maxResults)
+        public FindReferencesResult FindReferences(string objectType, string objectName, string memberName, string referenceKind, int maxResults)
         {
             ThreadHelper.ThrowIfNotOnUIThread();
             var result = new FindReferencesResult { Success = true };
 
             try
             {
-                var xrefProvider = CoreUtility.ServiceProvider
-                    .GetService(typeof(ICrossReferenceProvider)) as ICrossReferenceProvider;
+                // The global service registry often returns null; the providers object exposes it directly.
+                var xrefProvider = (MetaService != null ? _metaProviders?.CrossReferenceProvider : null)
+                    ?? CoreUtility.ServiceProvider.GetService(typeof(ICrossReferenceProvider)) as ICrossReferenceProvider;
 
                 if (xrefProvider == null)
                 {
-                    result.Message = "Cross-reference service not available. " +
-                        "The XRef database may not have been built yet — run a full build in VS to populate it.";
+                    result.Success = false;
+                    result.Message = "Cross-reference service not available in Visual Studio.";
                     return result;
                 }
 
@@ -3547,6 +3906,8 @@ namespace XppAiCopilotCompanion.MetaModel
                         "Supported: AxClass, AxTable, AxForm, AxEnum, AxView, AxQuery, AxEdt, AxDataEntityView.";
                     return result;
                 }
+                if (!string.IsNullOrEmpty(memberName))
+                    targetPath += "/Methods/" + memberName;
 
                 result.TargetPath = targetPath;
 
@@ -3584,10 +3945,10 @@ namespace XppAiCopilotCompanion.MetaModel
                 case "AxClass": return "Classes";
                 case "AxTable": return "Tables";
                 case "AxForm": return "Forms";
-                case "AxEnum": return "BaseEnums";
+                case "AxEnum": return "Enums";
                 case "AxView": return "Views";
                 case "AxQuery": return "Queries";
-                case "AxEdt": return "ExtendedDataTypes";
+                case "AxEdt": return "Edts";
                 case "AxMenuItemDisplay": return "MenuItemDisplays";
                 case "AxMenuItemOutput": return "MenuItemOutputs";
                 case "AxMenuItemAction": return "MenuItemActions";
@@ -3606,12 +3967,12 @@ namespace XppAiCopilotCompanion.MetaModel
             switch (folder)
             {
                 case "Classes": return "AxClass";
-                case "Tables": return "Tables";
+                case "Tables": return "AxTable";
                 case "Forms": return "AxForm";
-                case "BaseEnums": return "AxEnum";
+                case "Enums": return "AxEnum";
                 case "Views": return "AxView";
                 case "Queries": return "AxQuery";
-                case "ExtendedDataTypes": return "AxEdt";
+                case "Edts": return "AxEdt";
                 case "MenuItemDisplays": return "AxMenuItemDisplay";
                 case "MenuItemOutputs": return "AxMenuItemOutput";
                 case "MenuItemActions": return "AxMenuItemAction";

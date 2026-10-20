@@ -55,6 +55,23 @@ namespace XppAiCopilotCompanion.MetaModel
         public string Grant { get; set; }
     }
 
+    public sealed class DataEntityPermissionDto
+    {
+        public string Name { get; set; }
+        public string Grant { get; set; }
+        public string IntegrationMode { get; set; }
+    }
+
+    // A field added by a data entity extension, mapped to a field of one of the entity's data sources.
+    public sealed class EntityFieldDto
+    {
+        public string Name { get; set; }
+        public string DataSource { get; set; }
+        public string DataField { get; set; }
+        public string Label { get; set; }
+        public bool? Mandatory { get; set; }
+    }
+
     public sealed class QueryRangeDto
     {
         public string Field { get; set; }
@@ -74,6 +91,29 @@ namespace XppAiCopilotCompanion.MetaModel
         public bool? FirstOnly { get; set; }
         public List<QueryRangeDto> Ranges { get; set; } = new List<QueryRangeDto>();
         public List<QueryDataSourceDto> ChildDataSources { get; set; } = new List<QueryDataSourceDto>();
+    }
+
+    // A control added by a form extension. Only top-level controls carry placement
+    // (Parent/Position/PreviousSibling); nested Controls are placed inside their container.
+    public sealed class FormControlDto
+    {
+        public string Name { get; set; }
+        public string ControlType { get; set; }
+        public string Parent { get; set; }
+        public string Position { get; set; }
+        public string PreviousSibling { get; set; }
+        public string DataSource { get; set; }
+        public string DataField { get; set; }
+        public string DataGroup { get; set; }
+        public string Label { get; set; }
+        public Dictionary<string, string> Properties { get; set; }
+        public List<FormControlDto> Controls { get; set; } = new List<FormControlDto>();
+    }
+
+    public sealed class ControlModificationDto
+    {
+        public string Name { get; set; }
+        public Dictionary<string, string> Properties { get; set; }
     }
 
     // ── Request DTOs ──
@@ -97,6 +137,13 @@ namespace XppAiCopilotCompanion.MetaModel
         public List<RelationDto> Relations { get; set; }
         public List<EntryPointDto> EntryPoints { get; set; }
         public List<QueryDataSourceDto> DataSources { get; set; }
+        public List<FormControlDto> Controls { get; set; }
+        public List<ControlModificationDto> ControlModifications { get; set; }
+        public List<string> Privileges { get; set; }
+        public List<string> Duties { get; set; }
+        public List<DataEntityPermissionDto> DataEntityPermissions { get; set; }
+        public List<EntityFieldDto> EntityFields { get; set; }
+        public bool SkipStagingTable { get; set; }
 
         /// <summary>
         /// Convert to an UpdateObjectRequest so Create can delegate metadata
@@ -119,7 +166,14 @@ namespace XppAiCopilotCompanion.MetaModel
                 FieldGroups = FieldGroups,
                 Relations = Relations,
                 EntryPoints = EntryPoints,
-                DataSources = DataSources
+                DataSources = DataSources,
+                Controls = Controls,
+                ControlModifications = ControlModifications,
+                Privileges = Privileges,
+                Duties = Duties,
+                DataEntityPermissions = DataEntityPermissions,
+                EntityFields = EntityFields,
+                SkipStagingTable = SkipStagingTable
             };
         }
     }
@@ -143,6 +197,15 @@ namespace XppAiCopilotCompanion.MetaModel
         public List<RelationDto> Relations { get; set; }
         public List<EntryPointDto> EntryPoints { get; set; }
         public List<QueryDataSourceDto> DataSources { get; set; }
+        public List<FormControlDto> Controls { get; set; }
+        public List<ControlModificationDto> ControlModifications { get; set; }
+        public List<string> Privileges { get; set; }
+        public List<string> Duties { get; set; }
+        public List<DataEntityPermissionDto> DataEntityPermissions { get; set; }
+        public List<EntityFieldDto> EntityFields { get; set; }
+        public bool SkipStagingTable { get; set; }
+        // Entry points, privileges, duties or data entity permissions to remove, by name.
+        public List<string> RemoveSecurityItems { get; set; }
     }
 
     // ── Result DTOs ──
@@ -176,6 +239,8 @@ namespace XppAiCopilotCompanion.MetaModel
         public List<RelationDto> Relations { get; set; }
         public List<EntryPointDto> EntryPoints { get; set; }
         public List<QueryDataSourceDto> DataSources { get; set; }
+        public List<FormControlDto> Controls { get; set; }
+        public List<ControlModificationDto> ControlModifications { get; set; }
     }
 
     public sealed class MethodInfo
@@ -274,6 +339,7 @@ namespace XppAiCopilotCompanion.MetaModel
         public List<FieldGroupDto> FieldGroups { get; set; }
         public List<EntryPointDto> EntryPoints { get; set; }
         public List<QueryDataSourceDto> DataSources { get; set; }
+        public List<FormControlDto> Controls { get; set; }
     }
 
     public sealed class ValidateObjectResult
@@ -294,6 +360,13 @@ namespace XppAiCopilotCompanion.MetaModel
         public string ObjectType { get; set; }
         public string SchemaJson { get; set; }
         public string Message { get; set; }
+    }
+
+    public sealed class FormLayoutResult
+    {
+        public bool Success { get; set; }
+        public string Message { get; set; }
+        public string Layout { get; set; }
     }
 
     public sealed class CrossReferenceItem

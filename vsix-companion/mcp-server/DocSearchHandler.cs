@@ -35,6 +35,12 @@ namespace XppAiCopilotCompanion.McpServer
                         return JsonHelpers.BuildToolResult(idToken,
                             "Only Microsoft Learn URLs are allowed (https://learn.microsoft.com/...). "
                             + "Use 'query' parameter to search instead.", isError: true);
+                    // AX 2012 class docs describe a different code base; D365FO classes must be read from the live metadata.
+                    if (url.IndexOf("dynamics-ax-2012", StringComparison.OrdinalIgnoreCase) >= 0
+                        || url.IndexOf("dynamicsax-2012", StringComparison.OrdinalIgnoreCase) >= 0)
+                        return JsonHelpers.BuildToolResult(idToken,
+                            "AX 2012 documentation does not describe D365FO code. To see a class's methods and source, "
+                            + "call xpp_read_object; to see how it is used, call xpp_find_references.", isError: true);
                     fetchUrl = url;
                 }
                 else

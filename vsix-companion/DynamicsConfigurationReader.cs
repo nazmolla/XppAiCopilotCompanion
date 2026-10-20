@@ -46,12 +46,15 @@ namespace XppAiCopilotCompanion
                 if (!string.IsNullOrWhiteSpace(configJsonPath) && File.Exists(configJsonPath))
                 {
                     result.ConfigurationName = Path.GetFileNameWithoutExtension(configJsonPath);
+                    result.ConfigurationFilePath = configJsonPath;
 
                     var json = File.ReadAllText(configJsonPath, Encoding.UTF8);
                     var parsed = DeserializeConfig(json);
 
                     if (parsed != null)
                     {
+                        result.CrossReferencesDbServerName = parsed.CrossReferencesDbServerName?.Trim();
+                        result.CrossReferencesDatabaseName = parsed.CrossReferencesDatabaseName?.Trim();
                         // Custom metadata folder
                         if (!string.IsNullOrWhiteSpace(parsed.ModelStoreFolder))
                             result.CustomMetadataFolder = parsed.ModelStoreFolder.Trim();
@@ -119,12 +122,21 @@ namespace XppAiCopilotCompanion
 
         [DataMember(Name = "ReferencePackagesPaths", IsRequired = false)]
         public List<string> ReferencePackagesPaths { get; set; }
+
+        [DataMember(Name = "CrossReferencesDbServerName", IsRequired = false)]
+        public string CrossReferencesDbServerName { get; set; }
+
+        [DataMember(Name = "CrossReferencesDatabaseName", IsRequired = false)]
+        public string CrossReferencesDatabaseName { get; set; }
     }
 
     internal sealed class DynamicsMetadataConfig
     {
         public string ConfigurationName { get; set; }
+        public string ConfigurationFilePath { get; set; }
         public string CustomMetadataFolder { get; set; }
+        public string CrossReferencesDbServerName { get; set; }
+        public string CrossReferencesDatabaseName { get; set; }
         public List<string> ReferenceMetadataFolders { get; } = new List<string>();
 
         public bool HasCustom => !string.IsNullOrWhiteSpace(CustomMetadataFolder);

@@ -65,7 +65,14 @@ if exist "%COMPANION_DIR%" (
         echo       WARNING: Could not fully remove folder ^(files may be locked^).
         echo       Retrying in 3 seconds...
         timeout /t 3 /nobreak >nul
+        taskkill /im XppMcpServer.exe /f >nul 2>&1
         rd /s /q "%COMPANION_DIR%" >nul 2>&1
+    )
+    if exist "%COMPANION_DIR%\XppMcpServer.exe" (
+        echo       ERROR: Old MCP server files are still locked in %COMPANION_DIR%.
+        echo       Close any process using them and re-run this script.
+        pause
+        exit /b 1
     )
     echo       Cleaned.
 ) else (

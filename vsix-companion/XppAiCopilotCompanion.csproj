@@ -213,16 +213,11 @@ using System.Reflection%3B
              Value="$(ExtensionVersion)" />
   </Target>
 
-  <!-- 3. Force-sync and stamp intermediate manifest used for VSIX packaging -->
+  <!-- 3. Stamp intermediate manifest (never overwrite it with the source: that drops resolved |Project| asset paths) -->
   <Target Name="SyncIntermediateVsixManifest" BeforeTargets="CreateVsixContainer" DependsOnTargets="StampVsixVersion">
     <PropertyGroup>
-      <_ManifestPath>$(MSBuildProjectDirectory)\source.extension.vsixmanifest</_ManifestPath>
       <_IntermediateManifestPath>$(IntermediateOutputPath)extension.vsixmanifest</_IntermediateManifestPath>
     </PropertyGroup>
-
-    <Copy SourceFiles="$(_ManifestPath)"
-          DestinationFiles="$(_IntermediateManifestPath)"
-          SkipUnchangedFiles="false" />
 
     <XmlPoke XmlInputPath="$(_IntermediateManifestPath)"
              Namespaces="&lt;Namespace Prefix='v' Uri='http://schemas.microsoft.com/developer/vsx-schema/2011' /&gt;"

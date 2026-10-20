@@ -28,14 +28,16 @@ A standalone MCP (Model Context Protocol) server (`XppMcpServer.exe`) exposes 16
 
 | Tool | Description |
 |---|---|
-| `xpp_create_object` | Create any of 19 base object types with strongly-typed JSON metadata |
+| `xpp_create_object` | Create any of 19 base object types, plus table/enum/EDT extensions, with strongly-typed JSON metadata |
 | `xpp_read_object` | Read object declaration, methods, and typed metadata (properties, fields, indexes, etc.) |
 | `xpp_update_object` | Update declaration, methods, or metadata on existing custom objects |
 | `xpp_validate_object` | Validate that an object exists, is in the project, and has the expected metadata |
 | `xpp_find_object` | Search for objects by name pattern and type |
-| `xpp_list_objects` | List all objects of a given type in a model |
+| `xpp_list_objects` | Look up a handful of objects by a specific name substring |
+| `xpp_list_model_objects` | List what one model contains (counts per type, then paged names) — reads the model index on disk, outside VS |
 | `xpp_find_references` | Query the cross-reference database for all objects that use/reference a given object |
 | `xpp_get_object_type_schema` | Return the generated JSON schema for a metadata type via reflective type inspection |
+| `xpp_get_form_layout` | Show a form's data sources and control tree with all extensions merged and attributed — the survey step before placing form-extension controls |
 | `xpp_get_model_info` | Get model descriptor (layer, references, dependencies) |
 | `xpp_list_models` | List all installed models with editability status |
 | `xpp_read_label` | Read a label by ID and language |
@@ -72,6 +74,19 @@ All 19 base types are created via the typed MetaModel API:
 | AxTile | ✅ | ✅ | ✅ | ✅ | Fully tested |
 
 **18 of 19 types pass full round-trip testing** (read → create → validate → compare). AxQuery read works; create+update has a known MetaModel API reflection ambiguity with complex query metadata.
+
+#### Object Extensions
+
+`IMetaModelService` can only read extensions, so extension writes go through the D365FO metadata provider (`IMetaModelProviders.CurrentMetadataProvider`). Extensions are named `<BaseObject>.<Suffix>` and can only be created in custom models.
+
+| Extension Type | Read | Create | Update | Validate | What can be changed |
+|---|:---:|:---:|:---:|:---:|---|
+| AxTableExtension | ✅ | ✅ | ✅ | ✅ | Add fields, indexes, field groups, relations; property modifications |
+| AxEnumExtension | ✅ | ✅ | ✅ | ✅ | Add enum values; property modifications |
+| AxEdtExtension | ✅ | ✅ | ✅ | ✅ | Property modifications |
+| AxFormExtension | ✅ | ✅ | ✅ | ✅ | Add controls with explicit placement (parent + begin/end/after), data sources; control property modifications |
+
+Form extensions are survey-first: `xpp_get_form_layout` shows the base form with **all** existing extensions merged (each extension control and data source is attributed). New controls must name a parent and a position; placement is validated against that merged form before anything is saved, and re-verified after saving.
 
 #### Strongly-Typed JSON Metadata
 

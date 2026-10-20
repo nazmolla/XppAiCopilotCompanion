@@ -22,11 +22,12 @@ namespace XppAiCopilotCompanion.MetaModel
 
         FindObjectResult FindObject(string objectName, string objectType, bool exactMatch, int maxResults);
         ListObjectsResult ListObjects(string modelName, string objectType, string nameFilter, int maxResults);
-        FindReferencesResult FindReferences(string objectType, string objectName, string referenceKind, int maxResults);
+        FindReferencesResult FindReferences(string objectType, string objectName, string memberName, string referenceKind, int maxResults);
         ObjectTypeSchemaResult GetObjectTypeSchema(string objectType);
         ProxyGenerationResult GenerateProxies(ProxyGenerationRequest request);
         ModelInfoResult GetModelInfo(string modelName);
         List<ModelSummary> ListModels();
+        FormLayoutResult GetFormLayout(string formName, string rootControl, int maxDepth);
 
         // ── Labels ──
 
