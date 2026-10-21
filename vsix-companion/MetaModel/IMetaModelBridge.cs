@@ -38,6 +38,14 @@ namespace XppAiCopilotCompanion.MetaModel
 
         MetaModelResult AddToProject(string objectType, string objectName);
         List<ProjectItemInfo> ListProjectItems();
+        bool HasActiveProject { get; }
+        string RemoveFromProjectJson(string objectType, string objectName);
+        string ListProjectsJson(string searchFolder);
+        string SelectProjectJson(string projectFile);
+        string DeleteObjectJson(string objectType, string objectName, bool checkOnly = false);
+        string BuildJson(string modelName, bool projectOnly, bool syncDatabase);
+        MetaModelBridge.BuildPlan PrepareBuild(string modelName, bool projectOnly);
+        string RunBuildJson(MetaModelBridge.BuildPlan plan, bool syncDatabase);
 
         // ── Environment ──
 

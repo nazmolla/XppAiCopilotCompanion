@@ -123,6 +123,13 @@ namespace XppAiCopilotCompanion.MetaModel
                 string preError = PreValidateCreate(request);
                 if (preError != null) return Fail(preError);
 
+                if (request.ObjectType == "AxTable" || request.ObjectType == "AxTableExtension")
+                {
+                    string tableName = request.ObjectType == "AxTable" ? request.ObjectName : request.ObjectName.Split('.')[0];
+                    string relationError = ValidateRelations(tableName, request.Fields, request.Relations);
+                    if (relationError != null) return Fail(relationError);
+                }
+
                 MetaModelResult result;
                 switch (request.ObjectType)
                 {
@@ -152,6 +159,8 @@ namespace XppAiCopilotCompanion.MetaModel
                     case "AxSecurityDutyExtension": result = CreateSecurityDutyExtension(request, saveInfo); break;
                     case "AxSecurityRoleExtension": result = CreateSecurityRoleExtension(request, saveInfo); break;
                     case "AxDataEntityViewExtension": result = CreateDataEntityViewExtension(request, saveInfo); break;
+                    case "AxLabelFile":      result = CreateLabelFile(request, saveInfo); break;
+                    case "AxMenuExtension":  result = CreateMenuExtension(request, saveInfo); break;
 
                     default:
                         result = Fail("Unsupported object type: " + request.ObjectType); break;
@@ -170,15 +179,22 @@ namespace XppAiCopilotCompanion.MetaModel
                     {
                         var updateResult = UpdateObject(request.ToUpdateRequest());
                         if (!updateResult.Success)
-                            return Fail("Created blank " + request.ObjectType + " '"
-                                + request.ObjectName + "' but metadata apply failed: "
-                                + updateResult.Message);
+                        {
+                            // Never leave a half-created object behind.
+                            string rollback = DeleteObjectJson(request.ObjectType, request.ObjectName);
+                            bool rolledBack = rollback.Contains("\"success\":true");
+                            return Fail("Could not create " + request.ObjectType + " '" + request.ObjectName + "': "
+                                + updateResult.Message + (rolledBack ? " Nothing was saved." : " The blank object could not be removed: " + rollback));
+                        }
 
                         // Keep the update's report (e.g. form placement verification) visible to the caller.
                         int reportStart = updateResult.Message?.IndexOf('\n') ?? -1;
                         if (reportStart >= 0)
                             result.Message += updateResult.Message.Substring(reportStart);
                     }
+
+                    result.Message += "\n" + AddCreatedObjectToProject(request.ObjectType, request.ObjectName);
+                    result.Message += ObsoleteBaseWarning(request.ObjectType, request.ObjectName);
                 }
                 return result;
             }
@@ -196,6 +212,13 @@ namespace XppAiCopilotCompanion.MetaModel
 
             try
             {
+                if (request.ObjectType == "AxTable" || request.ObjectType == "AxTableExtension")
+                {
+                    string tableName = request.ObjectType == "AxTable" ? request.ObjectName : request.ObjectName.Split('.')[0];
+                    string relationError = ValidateRelations(tableName, request.Fields, request.Relations);
+                    if (relationError != null) return Fail(relationError);
+                }
+
                 MetaModelResult result;
                 switch (request.ObjectType)
                 {
@@ -237,6 +260,8 @@ namespace XppAiCopilotCompanion.MetaModel
                         result = UpdateSecurityRoleExtension(request); break;
                     case "AxDataEntityViewExtension":
                         result = UpdateDataEntityViewExtension(request); break;
+                    case "AxMenuExtension":
+                        result = UpdateMenuExtension(request); break;
                     default:
                         result = UpdateGenericByTypedApi(request); break;
                 }
@@ -322,6 +347,7 @@ namespace XppAiCopilotCompanion.MetaModel
                         var edt = MetaService.GetExtendedDataType(objectName);
                         if (edt == null) return new ReadObjectResult { Message = "EDT '" + objectName + "' not found." };
                         result.Properties = ExtractProperties(edt);
+                        result.Properties["EdtType"] = edt.GetType().Name.Substring("AxEdt".Length);
                         result.TypedMetadataJson = BuildTypedMetadataJson(objectType, edt);
                         result.ModelName = GetObjectModelName(objectType, objectName);
                         break;
@@ -343,6 +369,8 @@ namespace XppAiCopilotCompanion.MetaModel
                         if (qry == null) return new ReadObjectResult { Message = "Query '" + objectName + "' not found." };
                         result.Properties = ExtractProperties(qry);
                         result.DataSources = ExtractQueryDataSources(qry);
+                        foreach (var m in qry.Methods)
+                            result.Methods.Add(new MethodInfo { Name = m.Name, Source = m.Source });
                         result.TypedMetadataJson = BuildTypedMetadataJson(objectType, qry);
                         result.ModelName = GetObjectModelName(objectType, objectName);
                         break;
@@ -357,6 +385,16 @@ namespace XppAiCopilotCompanion.MetaModel
                         result.Properties = ExtractProperties(dev);
                         result.TypedMetadataJson = BuildTypedMetadataJson(objectType, dev);
                         result.ModelName = GetObjectModelName(objectType, objectName);
+                        // Agents need the data source names and mappings to extend an entity.
+                        result.DataSources = ExtractQueryDataSources(dev.ViewMetadata);
+                        result.EntityFields = dev.Fields
+                            .Select(f => new EntityFieldDto
+                            {
+                                Name = f.Name,
+                                DataSource = f.GetType().GetProperty("DataSource")?.GetValue(f) as string,
+                                DataField = f.GetType().GetProperty("DataField")?.GetValue(f) as string,
+                            })
+                            .ToList();
                         break;
 
                     case "AxMenu":
@@ -561,7 +599,7 @@ namespace XppAiCopilotCompanion.MetaModel
             if (result == null || axObj == null) return;
 
             result.Properties = ExtractProperties(axObj);
-            result.TypedMetadataJson = BuildTypedMetadataJson(objectType, axObj);
+            result.TypedMetadataJson = BuildFullGraphJson(axObj) ?? BuildTypedMetadataJson(objectType, axObj);
 
             var declarationProp = axObj.GetType().GetProperty("Declaration");
             result.Declaration = declarationProp?.GetValue(axObj) as string;
@@ -621,7 +659,7 @@ namespace XppAiCopilotCompanion.MetaModel
             }
         }
 
-        private static object ExtractMetadataGraph(object value, int depth, HashSet<object> visited)
+        private static object ExtractMetadataGraph(object value, int depth, HashSet<object> visited, Type declaredType = null)
         {
             if (value == null) return null;
             if (depth > 12) return null;
@@ -641,30 +679,49 @@ namespace XppAiCopilotCompanion.MetaModel
 
             if (value is System.Collections.IEnumerable enumerable && !(value is string))
             {
+                Type itemType = t.IsGenericType ? t.GetGenericArguments().LastOrDefault() : null;
                 var list = new List<object>();
                 foreach (object item in enumerable)
                 {
-                    object extracted = ExtractMetadataGraph(item, depth + 1, visited);
+                    object extracted = ExtractMetadataGraph(item, depth + 1, visited, itemType);
                     if (extracted != null) list.Add(extracted);
                 }
                 return list;
             }
 
             var dict = new Dictionary<string, object>(StringComparer.OrdinalIgnoreCase);
+            // Polymorphic members (menu elements, controls, fields): name the concrete type so its extra properties make sense.
+            if (declaredType != null && declaredType != t)
+                dict["$type"] = t.Name;
             foreach (var prop in t.GetProperties(BindingFlags.Public | BindingFlags.Instance))
             {
                 if (!prop.CanRead || prop.GetIndexParameters().Length > 0) continue;
-                if (prop.Name == "Parent" || prop.Name == "Owner") continue;
+                if (prop.Name == "Parent" && !(value is AxMenuExtensionElement)) continue;
+                if (prop.Name == "Owner") continue;
 
                 object propValue;
                 try { propValue = prop.GetValue(value); }
                 catch { continue; }
 
-                object extracted = ExtractMetadataGraph(propValue, depth + 1, visited);
+                object extracted = ExtractMetadataGraph(propValue, depth + 1, visited, prop.PropertyType);
                 if (extracted != null) dict[prop.Name] = extracted;
             }
 
             return dict;
+        }
+
+        // Full object graph (all properties, including those of subtypes) as JSON.
+        private static string BuildFullGraphJson(object axObj)
+        {
+            try
+            {
+                var serializer = new JavaScriptSerializer { MaxJsonLength = int.MaxValue, RecursionLimit = 64 };
+                return serializer.Serialize(ExtractMetadataGraph(axObj, 0, new HashSet<object>(ReferenceEqualityComparer.Instance)));
+            }
+            catch
+            {
+                return null;
+            }
         }
 
         private static Type ResolveProxyType(string objectType)
@@ -764,6 +821,19 @@ namespace XppAiCopilotCompanion.MetaModel
 
         // ── Validation ──
 
+        /// <summary>Bool properties read back as True/False while callers (and the property sheet) use Yes/No.</summary>
+        private static bool SamePropertyValue(string actual, string expected)
+        {
+            string Norm(string v)
+            {
+                v = (v ?? "").Trim();
+                if (v.Equals("true", StringComparison.OrdinalIgnoreCase)) return "yes";
+                if (v.Equals("false", StringComparison.OrdinalIgnoreCase)) return "no";
+                return v.ToLowerInvariant();
+            }
+            return Norm(actual) == Norm(expected);
+        }
+
         public ValidateObjectResult ValidateObject(ValidateObjectRequest req)
         {
             ThreadHelper.ThrowIfNotOnUIThread();
@@ -788,24 +858,10 @@ namespace XppAiCopilotCompanion.MetaModel
             result.Exists = true;
             result.ModelName = readResult.ModelName;
 
-            // 2. Check if in the active project (by name in filePath or item name)
-            var projectItems = ListProjectItems();
-            bool inProjectByItems = projectItems.Any(p =>
-                (p.FilePath != null && p.FilePath.IndexOf(req.ObjectName, StringComparison.OrdinalIgnoreCase) >= 0) ||
-                string.Equals(p.Name, req.ObjectName, StringComparison.OrdinalIgnoreCase));
-
-            bool inProjectByModel = false;
-            var activeProjectNode = GetActiveProjectNode();
-            if (activeProjectNode != null)
-            {
-                var activeModel = activeProjectNode.GetProjectsModelInfo();
-                if (activeModel != null && !string.IsNullOrWhiteSpace(readResult.ModelName))
-                {
-                    inProjectByModel = string.Equals(activeModel.Name, readResult.ModelName, StringComparison.OrdinalIgnoreCase);
-                }
-            }
-
-            result.InProject = inProjectByItems || inProjectByModel;
+            // 2. Project membership: the exact item (type\name) must be in the active project.
+            var activeProjectNode = GetActiveXppProject();
+            bool hasProject = activeProjectNode != null;
+            result.InProject = hasProject && activeProjectNode.Contains(req.ObjectType, req.ObjectName);
 
             // 3. Compare expected vs actual properties
             var mismatches = new List<string>();
@@ -833,11 +889,19 @@ namespace XppAiCopilotCompanion.MetaModel
 
             if (req.Properties != null)
             {
+                object axObject = null;
                 foreach (var kv in req.Properties)
                 {
-                    if (readResult.Properties == null || !readResult.Properties.TryGetValue(kv.Key, out string actual))
+                    string actual = null;
+                    if (readResult.Properties == null || !readResult.Properties.TryGetValue(kv.Key, out actual))
+                    {
+                        // The read omits properties at their default value; look at the object itself.
+                        if (axObject == null) axObject = ReadViaMetadataProvider(req.ObjectType, req.ObjectName, out _);
+                        actual = axObject?.GetType().GetProperty(kv.Key)?.GetValue(axObject)?.ToString();
+                    }
+                    if (actual == null)
                         mismatches.Add("Property '" + kv.Key + "': expected '" + kv.Value + "', not found on object");
-                    else if (!string.Equals(actual, kv.Value, StringComparison.OrdinalIgnoreCase))
+                    else if (!SamePropertyValue(actual, kv.Value))
                         mismatches.Add("Property '" + kv.Key + "': expected '" + kv.Value + "', actual '" + actual + "'");
                 }
             }
@@ -907,7 +971,7 @@ namespace XppAiCopilotCompanion.MetaModel
                         mismatches.Add("Index '" + idx.Name + "': expected to exist, not found");
                         continue;
                     }
-                    if (idx.AllowDuplicates != actual.AllowDuplicates)
+                    if (idx.AllowDuplicatesSpecified && idx.AllowDuplicates != actual.AllowDuplicates)
                         mismatches.Add("Index '" + idx.Name + "'.AllowDuplicates: expected " + idx.AllowDuplicates + ", actual " + actual.AllowDuplicates);
                     if (idx.Fields != null && idx.Fields.Count > 0)
                     {
@@ -1032,14 +1096,18 @@ namespace XppAiCopilotCompanion.MetaModel
             }
 
             result.Mismatches = mismatches;
-            result.Valid = result.InProject && mismatches.Count == 0;
+            result.Valid = (result.InProject || !hasProject) && mismatches.Count == 0;
+            string projectNote = hasProject
+                ? (result.InProject ? " Object is in project " + activeProjectNode.Caption + "." : "")
+                : " Project membership NOT checked: no active project (set one with xpp_select_project).";
             if (result.Valid)
             {
-                result.Message = "Validation passed. Object exists in project and all specified metadata is present.";
+                result.Message = "Validation passed. All specified metadata is present." + projectNote;
             }
             else if (!result.InProject && mismatches.Count == 0)
             {
-                result.Message = "Object metadata is correct but it is NOT in the active project.";
+                result.Message = "Object metadata is correct but it is NOT in the active project " + activeProjectNode.Caption
+                    + ". Add it with xpp_add_to_project.";
             }
             else
             {
@@ -1243,12 +1311,15 @@ namespace XppAiCopilotCompanion.MetaModel
             catch (Exception ex)
             {
                 string svcContext = MetaService == null ? "[MetaService unavailable]" : "[MetaService active]";
-                result.Message = "Search error in FindObject (searching for '" + objectName + "' in type '" + objectType + "'): " + svcContext + " - " + ex.Message;
+                result.Success = false;
+                result.Message = ex is ArgumentException
+                    ? ex.Message
+                    : "Search error in FindObject (searching for '" + objectName + "' in type '" + objectType + "'): " + svcContext + " - " + ex.Message;
             }
 
             if (budgetExceeded)
                 result.Message = BudgetExceededMessage(result.Matches.Count);
-            else if (result.Matches.Count == 0)
+            else if (result.Matches.Count == 0 && result.Success)
                 result.Message = "No objects found matching '" + objectName + "'."
                     + (string.IsNullOrEmpty(objectType) ? "" : " (type: " + objectType + ")");
 
@@ -1313,7 +1384,8 @@ namespace XppAiCopilotCompanion.MetaModel
             }
             catch (Exception ex)
             {
-                result.Message = "List error: " + ex.Message;
+                result.Success = false;
+                result.Message = ex is ArgumentException ? ex.Message : "List error: " + ex.Message;
             }
 
             if (budgetExceeded)
@@ -1361,7 +1433,11 @@ namespace XppAiCopilotCompanion.MetaModel
                     Success = true,
                     ObjectType = objectType,
                     SchemaJson = serializer.Serialize(schema),
-                    Message = "Schema generated for " + objectType
+                    Message = "Schema generated for " + metadataType.Name
+                        + (metadataType == typeof(AxEdt)
+                            ? ". AxEdt is abstract: create EDTs with properties.EdtType = String, Int, Int64, Real, Enum, Date, UtcDateTime, Time, Guid or Container "
+                              + "(or Extends = a parent EDT, whose kind is used). Kind-specific properties (StringSize, EnumType, NoOfDecimals, ...): request the schema of AxEdtString, AxEdtEnum, AxEdtReal, ..."
+                            : "")
                 };
             }
             catch (Exception ex)
@@ -1594,9 +1670,13 @@ namespace XppAiCopilotCompanion.MetaModel
                     Name = modelInfo.Name,
                     DisplayName = modelInfo.DisplayName,
                     Publisher = modelInfo.Publisher,
-                    Version = modelInfo.VersionBuild.ToString(),
-                    ModelId = modelInfo.Id,
-                    Layer = modelInfo.Layer.ToString()
+                    Version = modelInfo.VersionMajor + "." + modelInfo.VersionMinor + "." + modelInfo.VersionBuild + "." + modelInfo.VersionRevision,
+                    ModelId = DescriptorModelId(modelInfo) ?? modelInfo.Id,
+                    Layer = modelInfo.Layer >= 0 && modelInfo.Layer < LayerNames.Length
+                        ? LayerNames[modelInfo.Layer] + " (" + modelInfo.Layer + ")"
+                        : modelInfo.Layer.ToString(),
+                    Package = modelInfo.Module,
+                    Dependencies = modelInfo.ModuleReferences?.ToList() ?? new List<string>()
                 };
 
                 return result;
@@ -1729,10 +1809,12 @@ namespace XppAiCopilotCompanion.MetaModel
                 var metadataType = ResolveMetadataType(objectType);
                 if (metadataType == null)
                     return Fail("Unsupported object type for project add: " + objectType);
+                if (SubProvider(objectType, out _) != null && !ObjectExists(objectType, objectName))
+                    return Fail(objectType + " '" + objectName + "' does not exist.");
 
                 // D365FO projects belong to one model; adding another model's objects causes build/designer errors.
                 var projectModel = projectNode.GetProjectsModelInfo();
-                string objectModel = GetObjectModelName(objectType, objectName);
+                string objectModel = ModelOf(objectType, objectName);
                 if (projectModel != null && !string.IsNullOrEmpty(objectModel)
                     && !string.Equals(projectModel.Name, objectModel, StringComparison.OrdinalIgnoreCase))
                 {
@@ -1757,6 +1839,8 @@ namespace XppAiCopilotCompanion.MetaModel
                 return Fail("Add to project failed: " + ex.Message);
             }
         }
+
+        public bool HasActiveProject => GetActiveProject() != null;
 
         public List<ProjectItemInfo> ListProjectItems()
         {
@@ -1873,14 +1957,37 @@ namespace XppAiCopilotCompanion.MetaModel
 
         private MetaModelResult CreateForm(CreateObjectRequest req, ModelSaveInfo saveInfo)
         {
-            MetaService.CreateForm(new AxForm { Name = req.ObjectName }, saveInfo);
+            var form = new AxForm { Name = req.ObjectName };
+            EnsureDeclaration(form, "AxForm");
+            MetaService.CreateForm(form, saveInfo);
             return Ok("Created AxForm '" + req.ObjectName + "'.");
         }
 
         private MetaModelResult CreateEdt(CreateObjectRequest req, ModelSaveInfo saveInfo)
         {
-            MetaService.CreateExtendedDataType(new AxEdtString { Name = req.ObjectName }, saveInfo);
-            return Ok("Created AxEdt '" + req.ObjectName + "'.");
+            string kind = null;
+            req.Properties?.TryGetValue("EdtType", out kind);
+            string extends = null;
+            req.Properties?.TryGetValue("Extends", out extends);
+            if (string.IsNullOrEmpty(kind) && !string.IsNullOrEmpty(extends))
+            {
+                var parent = MetaService.GetExtendedDataType(extends);
+                if (parent == null) return Fail("Extends: EDT '" + extends + "' does not exist.");
+                kind = parent.GetType().Name.Substring("AxEdt".Length);
+            }
+            if (string.IsNullOrEmpty(kind))
+                kind = req.Properties != null && req.Properties.ContainsKey("EnumType") ? "Enum" : "String";
+            if (kind.Equals("DateTime", StringComparison.OrdinalIgnoreCase)) kind = "UtcDateTime";
+
+            Type edtType = typeof(AxEdt).Assembly.GetTypes()
+                .FirstOrDefault(t => !t.IsAbstract && typeof(AxEdt).IsAssignableFrom(t) && t.Name.Equals("AxEdt" + kind, StringComparison.OrdinalIgnoreCase));
+            if (edtType == null)
+                return Fail("Unknown EdtType '" + kind + "'. Use String, Int, Int64, Real, Enum, Date, UtcDateTime, Time, Guid or Container.");
+
+            var edt = (AxEdt)Activator.CreateInstance(edtType);
+            edt.Name = req.ObjectName;
+            MetaService.CreateExtendedDataType(edt, saveInfo);
+            return Ok("Created AxEdt '" + req.ObjectName + "' (" + edtType.Name.Substring("AxEdt".Length) + ").");
         }
 
         private MetaModelResult CreateEnum(CreateObjectRequest req, ModelSaveInfo saveInfo)
@@ -1915,20 +2022,26 @@ namespace XppAiCopilotCompanion.MetaModel
 
         private MetaModelResult CreateQuery(CreateObjectRequest req, ModelSaveInfo saveInfo)
         {
-            MetaService.CreateQuery(new AxQuerySimple { Name = req.ObjectName }, saveInfo);
+            var query = new AxQuerySimple { Name = req.ObjectName };
+            EnsureDeclaration(query, "AxQuery");
+            MetaService.CreateQuery(query, saveInfo);
             return Ok("Created AxQuery '" + req.ObjectName + "'.");
         }
 
         private MetaModelResult CreateView(CreateObjectRequest req, ModelSaveInfo saveInfo)
         {
-            MetaService.CreateView(new AxView { Name = req.ObjectName }, saveInfo);
+            var view = new AxView { Name = req.ObjectName };
+            EnsureDeclaration(view, "AxView");
+            MetaService.CreateView(view, saveInfo);
             return Ok("Created AxView '" + req.ObjectName + "'.");
         }
 
         private MetaModelResult CreateDataEntityView(CreateObjectRequest req, ModelSaveInfo saveInfo)
         {
             // DataEntityView has no Create API; UpdateDataEntityView creates-or-updates.
-            MetaService.UpdateDataEntityView(new AxDataEntityView { Name = req.ObjectName }, saveInfo);
+            var entity = new AxDataEntityView { Name = req.ObjectName };
+            EnsureDeclaration(entity, "AxDataEntityView");
+            MetaService.UpdateDataEntityView(entity, saveInfo);
             return Ok("Created AxDataEntityView '" + req.ObjectName + "'.");
         }
 
@@ -2208,6 +2321,9 @@ namespace XppAiCopilotCompanion.MetaModel
             if (saveInfo == null) return Fail("Cannot resolve model for '" + req.ObjectName + "'.");
 
             ApplyTypedMetadata(enm, req);
+            // The compiler rejects extensible enums with explicit values.
+            if (enm.IsExtensible)
+                TrySetPropertyValue(enm, "No", "UseEnumValue");
             MetaService.UpdateEnum(enm, saveInfo);
             return Ok("Updated AxEnum '" + req.ObjectName + "'.");
         }
@@ -2240,6 +2356,7 @@ namespace XppAiCopilotCompanion.MetaModel
             if (saveInfo == null) return Fail("Cannot resolve model for '" + req.ObjectName + "'.");
 
             ApplyTypedMetadata(qry, req);
+            EnsureDeclaration(qry, "AxQuery");
             MetaService.UpdateQuery(qry, saveInfo);
             return Ok("Updated AxQuery '" + req.ObjectName + "'.");
         }
@@ -2316,6 +2433,7 @@ namespace XppAiCopilotCompanion.MetaModel
                     if (string.IsNullOrWhiteSpace(src)) continue;
                     string clean = PrepareSource(src, formatCode);
                     string name = ExtractMethodName(clean);
+                    if (formatCode) clean = IndentMethodSource(clean);
                     var found = existing.FirstOrDefault(m =>
                         m.Name.Equals(name, StringComparison.OrdinalIgnoreCase));
                     if (found != null)
@@ -2334,6 +2452,21 @@ namespace XppAiCopilotCompanion.MetaModel
         {
             string clean = StripCData(source);
             return formatCode ? NormalizeXppWhitespace(clean) : clean;
+        }
+
+        /// <summary>
+        /// Visual Studio stores a method one level inside the class (4 spaces) after a leading newline;
+        /// sources written at column 0 are shifted so the code view and the compiler's line numbers match.
+        /// </summary>
+        private static string IndentMethodSource(string source)
+        {
+            if (string.IsNullOrWhiteSpace(source)) return source;
+            var lines = source.Replace("\r\n", "\n").Split('\n').ToList();
+            while (lines.Count > 0 && lines[0].Trim().Length == 0) lines.RemoveAt(0);
+            int minIndent = lines.Where(l => l.Trim().Length > 0).Select(l => l.Length - l.TrimStart(' ').Length).DefaultIfEmpty(0).Min();
+            if (minIndent >= 4) return "\n" + string.Join("\n", lines);
+            string pad = new string(' ', 4 - minIndent);
+            return "\n" + string.Join("\n", lines.Select(l => l.Trim().Length == 0 ? "" : pad + l));
         }
 
         private static string NormalizeXppWhitespace(string source)
@@ -2547,11 +2680,27 @@ namespace XppAiCopilotCompanion.MetaModel
                 case "AxEdtExtension": return typeof(AxEdtExtension);
                 case "AxFormExtension": return typeof(AxFormExtension);
 
-                default: return null;
+                default:
+                    // Concrete kinds such as AxEdtString / AxEdtEnum, menu extensions, label files, ...
+                    return typeof(AxEdt).Assembly.GetTypes().FirstOrDefault(t => t.IsPublic && !t.IsAbstract
+                        && t.Namespace == typeof(AxEdt).Namespace && t.Name.Equals(objectType, StringComparison.OrdinalIgnoreCase));
             }
         }
 
         // ── Strongly-typed metadata apply methods ──
+
+        // Properties of the current create/update that could not be applied; reported back instead of being dropped silently.
+        private static readonly List<string> IgnoredProperties = new List<string>();
+        private static readonly HashSet<string> RequestOnlyProperties = new HashSet<string>(StringComparer.OrdinalIgnoreCase) { "EdtType", "Languages", "Language" };
+
+        public static void ClearIgnoredProperties() { lock (IgnoredProperties) IgnoredProperties.Clear(); }
+
+        public static string IgnoredPropertiesReport()
+        {
+            lock (IgnoredProperties)
+                return IgnoredProperties.Count == 0 ? ""
+                    : "\nWARNING - properties NOT applied: " + string.Join("; ", IgnoredProperties.Distinct()) + ". Check names with xpp_get_object_type_schema.";
+        }
 
         private static void ApplyProperties(object target, Dictionary<string, string> props)
         {
@@ -2560,7 +2709,12 @@ namespace XppAiCopilotCompanion.MetaModel
             foreach (var kvp in props)
             {
                 var prop = type.GetProperty(kvp.Key);
-                if (prop == null || !prop.CanWrite) continue;
+                if (prop == null || !prop.CanWrite)
+                {
+                    if (!RequestOnlyProperties.Contains(kvp.Key))
+                        lock (IgnoredProperties) IgnoredProperties.Add(kvp.Key + " (no such property on " + type.Name + ")");
+                    continue;
+                }
                 try
                 {
                     var propType = prop.PropertyType;
@@ -2578,7 +2732,7 @@ namespace XppAiCopilotCompanion.MetaModel
                         else if (underlying == typeof(long))
                             value = long.Parse(kvp.Value);
                         else if (underlying.IsEnum)
-                            value = Enum.Parse(underlying, kvp.Value, true);
+                            value = Enum.Parse(underlying, BoolToNoYes(underlying, kvp.Value), true);
                         else
                             continue;
                     }
@@ -2592,13 +2746,17 @@ namespace XppAiCopilotCompanion.MetaModel
                     else if (propType == typeof(long))
                         value = long.Parse(kvp.Value);
                     else if (propType.IsEnum)
-                        value = Enum.Parse(propType, kvp.Value, true);
+                        value = Enum.Parse(propType, BoolToNoYes(propType, kvp.Value), true);
                     else
                         continue;
 
                     prop.SetValue(target, value);
                 }
-                catch { }
+                catch
+                {
+                    string allowed = prop.PropertyType.IsEnum ? "; allowed: " + string.Join(", ", Enum.GetNames(prop.PropertyType)) : "";
+                    lock (IgnoredProperties) IgnoredProperties.Add(kvp.Key + "='" + kvp.Value + "' (invalid value" + allowed + ")");
+                }
             }
         }
 
@@ -3333,7 +3491,7 @@ namespace XppAiCopilotCompanion.MetaModel
             if (collection == null || dto == null) return null;
             if (string.IsNullOrWhiteSpace(dto.Name) && string.IsNullOrWhiteSpace(dto.Table)) return null;
 
-            var addMethod = collection.GetType().GetMethod("Add");
+            var addMethod = SingleItemAddMethod(collection.GetType());
             if (addMethod == null || addMethod.GetParameters().Length != 1) return null;
             Type dsType = addMethod.GetParameters()[0].ParameterType;
 
@@ -3398,7 +3556,7 @@ namespace XppAiCopilotCompanion.MetaModel
             var rangesCollection = rangesProp?.GetValue(dataSource);
             if (rangesCollection == null) return;
 
-            var addMethod = rangesCollection.GetType().GetMethod("Add");
+            var addMethod = SingleItemAddMethod(rangesCollection.GetType());
             if (addMethod == null || addMethod.GetParameters().Length != 1) return;
             Type rangeType = addMethod.GetParameters()[0].ParameterType;
 
@@ -3441,7 +3599,7 @@ namespace XppAiCopilotCompanion.MetaModel
                     else if (propType == typeof(long))
                         converted = long.Parse(value);
                     else if (propType.IsEnum)
-                        converted = Enum.Parse(propType, value, true);
+                        converted = Enum.Parse(propType, BoolToNoYes(propType, value), true);
                     else
                         continue;
 
@@ -3453,6 +3611,15 @@ namespace XppAiCopilotCompanion.MetaModel
                     // Try next matching property name.
                 }
             }
+        }
+
+        // NoYes-style enums accept JSON booleans.
+        private static string BoolToNoYes(Type enumType, string value)
+        {
+            if (!Enum.GetNames(enumType).Contains("Yes", StringComparer.OrdinalIgnoreCase)) return value;
+            if (value.Equals("true", StringComparison.OrdinalIgnoreCase) || value == "1") return "Yes";
+            if (value.Equals("false", StringComparison.OrdinalIgnoreCase) || value == "0") return "No";
+            return value;
         }
 
         // ── Strongly-typed metadata extraction (for read) ──
@@ -3473,6 +3640,10 @@ namespace XppAiCopilotCompanion.MetaModel
                 "Parent", "Owner"
             };
 
+            // A fresh instance carries the real defaults (e.g. UseEnumValue defaults to Yes, so No must be shown).
+            object defaults = null;
+            try { defaults = Activator.CreateInstance(axObj.GetType()); } catch { }
+
             foreach (var prop in axObj.GetType().GetProperties())
             {
                 if (!prop.CanRead || excluded.Contains(prop.Name)) continue;
@@ -3486,12 +3657,19 @@ namespace XppAiCopilotCompanion.MetaModel
                 {
                     var val = prop.GetValue(axObj);
                     if (val == null) continue;
-                    // Skip defaults to keep output clean
-                    if (underlying == typeof(bool) && !(bool)val) continue;
-                    if (underlying == typeof(int) && (int)val == 0) continue;
-                    if (underlying == typeof(long) && (long)val == 0) continue;
                     if (underlying == typeof(string) && string.IsNullOrEmpty((string)val)) continue;
-                    if (underlying.IsEnum && Convert.ToInt32(val) == 0) continue;
+                    // Skip defaults to keep output clean
+                    if (defaults != null)
+                    {
+                        if (Equals(val, prop.GetValue(defaults))) continue;
+                    }
+                    else
+                    {
+                        if (underlying == typeof(bool) && !(bool)val) continue;
+                        if (underlying == typeof(int) && (int)val == 0) continue;
+                        if (underlying == typeof(long) && (long)val == 0) continue;
+                        if (underlying.IsEnum && Convert.ToInt32(val) == 0) continue;
+                    }
                     props[prop.Name] = val.ToString();
                 }
                 catch { }
@@ -3861,6 +4039,15 @@ namespace XppAiCopilotCompanion.MetaModel
                 searchers.Add(new TypeSearcher("AxMenuItemOutput", () => MetaService.GetMenuItemOutputNames()));
             if (string.IsNullOrEmpty(objectType) || objectType == "AxMenuItemAction")
                 searchers.Add(new TypeSearcher("AxMenuItemAction", () => MetaService.GetMenuItemActionNames()));
+
+            // Any other type (data entities, security, extensions, label files, ...) through its provider.
+            if (searchers.Count == 0 && !string.IsNullOrEmpty(objectType))
+            {
+                var names = NamesForType(objectType);
+                if (names == null)
+                    throw new ArgumentException("Unknown object type '" + objectType + "'. Use a metadata type name such as AxClass, AxTable, AxDataEntityView, AxSecurityRole or AxTableExtension.");
+                searchers.Add(new TypeSearcher(objectType, () => names));
+            }
 
             return searchers;
         }

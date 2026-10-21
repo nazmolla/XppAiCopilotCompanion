@@ -47,6 +47,17 @@ ownership rules, auto-add objects to the VS project, and handle all operations.
                                   expected properties/fields/relations. Automatically called after
                                   every create/update — also call explicitly when in doubt.
   xpp_get_environment          — Get environment info: metadata folders, active project/model.
+  xpp_select_project           — List the .rnrproj projects (no projectFile) or switch the active
+                                  project (adds it to the open solution if needed,
+                                  selects it and sets it as startup project).
+  xpp_remove_from_project      — Exclude an object from the active project (the object stays in
+                                  the model).
+  xpp_delete_object            — Delete a custom-model object completely (metadata file, project
+                                  entry). Blocked when other objects reference it unless force=true.
+  xpp_build                    — Build the model (or only the active project's objects) with the
+                                  same compiler as Visual Studio, report BUILD SUCCEEDED/FAILED with
+                                  every error and warning. Build after creating code and fix every
+                                  error before reporting done.
 
   ── Labels ──
   xpp_read_label               — Read labels from a label file. Look up by ID or search by text.

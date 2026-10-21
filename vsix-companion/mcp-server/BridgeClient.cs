@@ -21,6 +21,8 @@ namespace XppAiCopilotCompanion.McpServer
         private const int HttpTimeoutMs = 15_000;
         // Timeout for health-check pings
         private const int HealthTimeoutMs = 5_000;
+        // Builds (LabelC + xppc) take minutes.
+        private const int LongCallTimeoutMs = 30 * 60 * 1000;
         // How long a Call() caller waits for its queued request to complete
         private const int CallTimeoutMs = 18_000;
         // Cooldown after a bridge timeout before processing the next item
@@ -98,6 +100,17 @@ namespace XppAiCopilotCompanion.McpServer
         /// </summary>
         public string Call(string action, string bodyJson)
         {
+            // A build runs for minutes; it bypasses the single-worker queue so other calls keep flowing.
+            if (action == "build")
+            {
+                try { return ExecuteHttpCall(_bridgeUrl, action, bodyJson, LongCallTimeoutMs); }
+                catch (Exception ex)
+                {
+                    return "{\"success\":false,\"message\":\"Bridge call failed for action build: "
+                        + JsonHelpers.EscapeJsonString(ex.Message) + "\"}";
+                }
+            }
+
             var item = new BridgeWorkItem
             {
                 BridgeUrl = _bridgeUrl,
@@ -188,9 +201,9 @@ namespace XppAiCopilotCompanion.McpServer
             }
         }
 
-        private static string ExecuteHttpCall(string bridgeUrl, string action, string bodyJson)
+        private static string ExecuteHttpCall(string bridgeUrl, string action, string bodyJson, int timeoutMs = HttpTimeoutMs)
         {
-            using (var client = new TimeoutWebClient { TimeoutMs = HttpTimeoutMs })
+            using (var client = new TimeoutWebClient { TimeoutMs = timeoutMs })
             {
                 client.Encoding = Encoding.UTF8;
                 client.Headers[HttpRequestHeader.ContentType] = "application/json";

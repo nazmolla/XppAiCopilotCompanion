@@ -26,15 +26,17 @@
 │  ┌────────────────────────────────────────────────────────────────┐ │
 │  │  MCP Server (XppMcpServer.exe — port 21329)                    │ │
 │  │                                                                │ │
-│  │  16 tools exposed via Model Context Protocol (SSE/HTTP)        │ │
+│  │  22 tools exposed via Model Context Protocol (SSE/HTTP)        │ │
 │  │  ┌──────────────────┬──────────────────┬────────────────────┐ │ │
 │  │  │ xpp_create_object│ xpp_read_object  │ xpp_update_object  │ │ │
 │  │  │ xpp_find_object  │ xpp_list_objects │ xpp_find_references│ │ │
 │  │  │ xpp_get_model_info│ xpp_list_models │ xpp_read_label     │ │ │
 │  │  │ xpp_create_label │ xpp_add_to_proj  │ xpp_list_proj_items│ │ │
 │  │  │ xpp_get_environment│ xpp_search_docs│ xpp_validate_object│ │ │
-│  │  │ xpp_get_object_  │                  │                    │ │ │
-│  │  │   type_schema    │                  │                    │ │ │
+│  │  │ xpp_get_object_  │ xpp_get_form_    │ xpp_list_model_    │ │ │
+│  │  │   type_schema    │   layout         │   objects          │ │ │
+│  │  │ xpp_delete_object│ xpp_remove_from_ │ xpp_select_project │ │ │
+│  │  │ xpp_build        │   project        │                    │ │ │
 │  │  └──────────────────┴──────────────────┴────────────────────┘ │ │
 │  │                                                                │ │
 │  │  ToolRouter.cs  → Tool definitions, JSON schema, routing      │ │
@@ -154,6 +156,7 @@ The MCP server and MetaModel Bridge use several interlocking mechanisms to stay 
 2. **Dispatch gate with hold-on-timeout** — `MetaModelBridgeServer.DispatchAction` acquires a `SemaphoreSlim(1,1)` before marshalling to the main thread. If the call times out, the gate is **not released** until the hung task completes (via a `ContinueWith` callback). This prevents new requests from piling up behind a blocked main thread.
 3. **Cancelled-item skip** — When the `BridgeClient.Call()` caller times out waiting for the queue, it sets a `Cancelled` flag on the work item. The queue worker checks this flag before making the HTTP call and skips cancelled items, avoiding wasted round-trips.
 4. **Post-timeout cooldown** — After a timeout, `BridgeClient` sleeps for a configurable cooldown period to give the bridge time to recover before the next request.
+5. **Builds run off the UI thread** — `xpp_build` bypasses the serial queue (direct HTTP call, 30-minute timeout). The bridge gathers what it needs from Visual Studio on the main thread (`PrepareBuild`: model, package, project items), releases the dispatch gate, and runs LabelC/xppc on the request thread (`RunBuildJson`), so Visual Studio and other tool calls stay responsive.
 
 ---
 
@@ -190,6 +193,11 @@ vsix-companion/
 │   │                                    #   methods + ApplyProperties, ApplyEnumValues,
 │   │                                    #   ApplyFields, ApplyIndexes, ApplyRelations,
 │   │                                    #   ExtractProperties, ExtractFields, etc.
+│   ├── MetaModelBridge.AgentOps.cs      # Delete/exclude, label files, menu extensions, relation checks,
+│   │                                    #   rollback of half-created objects, project auto-add
+│   ├── MetaModelBridge.Build.cs         # xpp_build: LabelC + xppc, diagnostics from the xppc XML log
+│   ├── MetaModelBridge.VsProject.cs     # Active project via DTE/VSProjectNode (items, add, remove),
+│   │                                    #   xpp_select_project over the open solution
 │   ├── MetaModelBridgeServer.cs         # HTTP server (port 21330) — JSON parsing/serialization,
 │   │                                    #   request routing to MetaModelBridge, dispatch gate
 │   │                                    #   with hold-on-timeout cascade prevention
@@ -199,10 +207,10 @@ vsix-companion/
 │
 ├── mcp-server/                           # ── MCP Server (standalone exe) ──
 │   ├── Program.cs                       # Entry point — SSE/HTTP MCP server on port 21329
-│   ├── ToolRouter.cs                    # 16 tool definitions with JSON Schema, routing logic
+│   ├── ToolRouter.cs                    # 22 tool definitions with JSON Schema, routing logic
 │   ├── BridgeClient.cs                  # HTTP client → MetaModel Bridge (port 21330),
 │   │                                    #   serial queue (BlockingCollection), cancelled-item skip
-│   ├── DocSearchHandler.cs              # xpp_search_docs handler (Microsoft Learn scraping)
+│   ├── DocSearchHandler.cs              # xpp_search_docs handler (Learn semantic search, markdown pages)
 │   ├── HtmlExtractor.cs                 # HTML → text extraction for doc search
 │   ├── JsonHelpers.cs                   # JSON utilities
 │   ├── McpLogger.cs                     # MCP protocol logging

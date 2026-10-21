@@ -22,13 +22,13 @@ The result is that Copilot generates invalid or dangerous code — modifying bas
 
 This extension solves the problem at three levels:
 
-### 1. MCP Server with 16 Metadata Tools
+### 1. MCP Server with 22 Metadata Tools
 
-A standalone MCP (Model Context Protocol) server (`XppMcpServer.exe`) exposes 16 tools that Copilot can call directly. These tools use the D365FO MetaModel API — the **same API that Visual Studio uses internally** — to manipulate metadata with full type safety.
+A standalone MCP (Model Context Protocol) server (`XppMcpServer.exe`) exposes 22 tools that Copilot can call directly. These tools use the D365FO MetaModel API — the **same API that Visual Studio uses internally** — to manipulate metadata with full type safety.
 
 | Tool | Description |
 |---|---|
-| `xpp_create_object` | Create any of 19 base object types, plus table/enum/EDT extensions, with strongly-typed JSON metadata |
+| `xpp_create_object` | Create any of 19 base object types, extensions (table, enum, EDT, form, menu, data entity, security), label files and menu extensions, with strongly-typed JSON metadata. All-or-nothing: relations are checked before saving, a failed metadata apply rolls the object back, the object is added to the active project and the response ends with a `Validation:` line |
 | `xpp_read_object` | Read object declaration, methods, and typed metadata (properties, fields, indexes, etc.) |
 | `xpp_update_object` | Update declaration, methods, or metadata on existing custom objects |
 | `xpp_validate_object` | Validate that an object exists, is in the project, and has the expected metadata |
@@ -45,7 +45,11 @@ A standalone MCP (Model Context Protocol) server (`XppMcpServer.exe`) exposes 16
 | `xpp_add_to_project` | Add an existing object to the active VS project |
 | `xpp_list_project_items` | List items in the active VS project |
 | `xpp_get_environment` | Get D365FO environment info (metadata folders, active model) |
-| `xpp_search_docs` | Search Microsoft D365FO documentation |
+| `xpp_search_docs` | Search Microsoft D365FO documentation (Microsoft Learn semantic search; pages returned as markdown) |
+| `xpp_delete_object` | Delete an object of your own model completely (metadata file and project entry). Refused for standard/ISV objects, and while other objects still reference it unless `force=true` |
+| `xpp_remove_from_project` | Exclude an object from the active project; it stays in the model |
+| `xpp_select_project` | List the D365FO projects of the open solution, or make one active (added to the solution if needed, selected and set as startup project) |
+| `xpp_build` | Build a custom model (LabelC + xppc with cross-references) like Dynamics 365 > Build, and return BUILD SUCCEEDED/FAILED with every error, fatal error and warning; `scope=project` reports only the active project's objects. Runs off the VS UI thread |
 
 #### Supported Object Types (19)
 
@@ -64,7 +68,7 @@ All 19 base types are created via the typed MetaModel API:
 | AxMenuItemAction | ✅ | ✅ | ✅ | ✅ | Fully tested |
 | AxMenuItemDisplay | ✅ | ✅ | ✅ | ✅ | Fully tested |
 | AxMenuItemOutput | ✅ | ✅ | ✅ | ✅ | Fully tested |
-| AxQuery | ✅ | ⚠️ | ⚠️ | — | Create succeeds but metadata apply may fail (MetaModel API ambiguity) |
+| AxQuery | ✅ | ✅ | ✅ | ✅ | Data sources and ranges (class declaration added automatically); same code as the VS Code extension, where it is regression-tested |
 | AxSecurityPrivilege | ✅ | ✅ | ✅ | ✅ | Fully tested |
 | AxSecurityDuty | ✅ | ✅ | ✅ | ✅ | Fully tested |
 | AxSecurityRole | ✅ | ✅ | ✅ | ✅ | Fully tested |
@@ -73,7 +77,7 @@ All 19 base types are created via the typed MetaModel API:
 | AxConfigurationKey | ✅ | ✅ | ✅ | ✅ | Fully tested |
 | AxTile | ✅ | ✅ | ✅ | ✅ | Fully tested |
 
-**18 of 19 types pass full round-trip testing** (read → create → validate → compare). AxQuery read works; create+update has a known MetaModel API reflection ambiguity with complex query metadata.
+**All 19 types support read → create → validate → compare.**
 
 #### Object Extensions
 
@@ -101,6 +105,17 @@ All create/update/read operations use **strongly-typed JSON parameters** instead
 - **`entryPoints`** — `[{ "name": "Maintain", "objectType": "MenuItemDisplay", "objectName": "CustTable" }, ...]`
 
 Read results return the **same JSON format**, so Copilot can use a read result directly as a template for creating or modifying objects.
+
+Other behaviour worth knowing:
+
+- **EDTs**: set `properties.EdtType` (String, Int, Int64, Real, Enum, Date, UtcDateTime, Time, Guid, Container) or `properties.Extends`; the read shows the kind.
+- **Label files**: `xpp_create_object` with `AxLabelFile` and `properties.Languages` (e.g. `en-US,fr-CA`) creates one label file per language; `xpp_create_label` accepts `translations`.
+- **Menu extensions**: `AxMenuExtension` with `menuElements` (menu item, type, parent submenu, position).
+- **`methods`**: plain X++ source strings, or objects with `source`.
+- **Reads**: data entities include data sources, entity fields and the staging table; `methodNames` returns only the requested methods; only non-default properties are shown.
+- **Validation** compares only the attributes you passed, treats Yes/True and No/False alike, and checks project membership for real.
+- **Find/list** reject unknown types, find data entities and security roles, and say `0 matches` when nothing matches; `xpp_list_model_objects` explains package names that contain several models.
+- **Where-used** marks objects from packages that are not installed locally (typically test packages).
 
 ### 2. Embedded X++ Knowledge (System Prompt Injection)
 
@@ -151,7 +166,7 @@ For detailed architecture diagrams, design decisions, data flow, reliability mec
 ### Build from Source
 
 1. Clone this repository
-2. Open `DynDevTools.sln` in Visual Studio 2022
+2. Open `DynDevTools.sln` in Visual Studio 2022 or later (or run `vsix-companion\build.cmd Release`; it finds MSBuild with vswhere)
 3. Ensure the **Visual Studio extension development** workload is installed
 4. Build the solution (`Ctrl+Shift+B`)
 5. The VSIX will be in `vsix-companion/bin/Release/XppAiCopilotCompanion.vsix`

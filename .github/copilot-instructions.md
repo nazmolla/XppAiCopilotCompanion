@@ -27,6 +27,8 @@ Required:
 - Search objects with xpp_find_object and xpp_list_objects.
 - Analyze usage impact with xpp_find_references.
 - Validate modifications with xpp_validate_object after create and update operations.
+- Delete wrong or probe objects with xpp_delete_object; exclude them from the project with xpp_remove_from_project.
+- Build with xpp_build after creating or changing code and fix every error before reporting completion.
 
 Forbidden:
 - Do not read raw metadata XML from disk for understanding objects.
@@ -52,12 +54,18 @@ Metadata CRUD:
 - xpp_create_object
 - xpp_update_object
 - xpp_validate_object
+- xpp_delete_object (own models only; refused while referenced unless force=true)
 
 Project and labels:
+- xpp_select_project (list the solution's D365FO projects or make one active)
 - xpp_add_to_project
+- xpp_remove_from_project (exclude from the project; the object stays in the model)
 - xpp_list_project_items
 - xpp_read_label
 - xpp_create_label
+
+Build:
+- xpp_build (LabelC + X++ compile; returns every error and warning)
 
 Documentation:
 - xpp_search_docs
@@ -142,6 +150,9 @@ Implement in dependency order:
 After every create or update:
 - Run xpp_validate_object
 - Fix mismatches before reporting completion
+
+Before reporting completion:
+- Run xpp_build and fix every error (BUILD SUCCEEDED is required)
 
 ## Ownership and Extensibility Rules
 

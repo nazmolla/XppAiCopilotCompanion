@@ -103,6 +103,71 @@ namespace XppAiCopilotCompanion.McpServer
 
         // ── Health / deployment checks ──
 
+        public string QueryJson(string objectType, string objectName, string memberName, int max, string kindName = null)
+        {
+            var json = new System.Web.Script.Serialization.JavaScriptSerializer { MaxJsonLength = int.MaxValue };
+            if (!TypeToFolder.TryGetValue(objectType ?? "", out string folder))
+                return json.Serialize(new Dictionary<string, object> { ["success"] = false, ["message"] = "Where-used is not available for " + objectType + "." });
+            int kind = string.IsNullOrEmpty(kindName) ? 0 : Array.FindIndex(KindNames, k => k.Equals(kindName, StringComparison.OrdinalIgnoreCase));
+            if (kind < 0)
+                return json.Serialize(new Dictionary<string, object> { ["success"] = false, ["message"] = "Unknown reference kind '" + kindName + "'." });
+
+            var health = GetHealth();
+            if (!health.Usable)
+                return json.Serialize(new Dictionary<string, object> { ["success"] = false, ["message"] = health.Problem });
+
+            string objectPath = "/" + folder + "/" + objectName;
+            try
+            {
+                using (var conn = Open(health.Server, health.Database))
+                {
+                    if (!TargetExists(conn, objectPath, memberName))
+                        return json.Serialize(new Dictionary<string, object> { ["success"] = false, ["message"] = NotIndexedMessage(conn, health, objectType, objectName, objectPath, memberName) });
+
+                    var rows = QueryReferences(conn, objectPath, memberName, kind, max + 1);
+                    var references = rows.Take(max).Select(r =>
+                    {
+                        var parts = r.Source.TrimStart('/').Split('/');
+                        string type = parts.Length >= 2 ? TypeToFolder.FirstOrDefault(kv => kv.Value.Equals(parts[0], StringComparison.OrdinalIgnoreCase)).Key : null;
+                        return new Dictionary<string, object>
+                        {
+                            ["objectType"] = type,
+                            ["objectName"] = parts.Length >= 2 ? parts[1] : r.Source,
+                            ["memberPath"] = parts.Skip(2).ToArray(),
+                            ["member"] = Member(r.Source),
+                            ["target"] = Member(r.Target, objectLevel: "(type)"),
+                            ["kind"] = KindName(r.Kind),
+                            ["line"] = r.Line,
+                            ["module"] = r.Module,
+                        };
+                    }).ToList();
+                    return json.Serialize(new Dictionary<string, object>
+                    {
+                        ["success"] = true,
+                        ["references"] = references,
+                        ["more"] = rows.Count > max,
+                        ["warnings"] = health.Warnings,
+                    });
+                }
+            }
+            catch (SqlException ex)
+            {
+                InvalidateHealth();
+                return json.Serialize(new Dictionary<string, object> { ["success"] = false, ["message"] = "Cross-reference query failed: " + ex.Message });
+            }
+        }
+
+        // ── Tags (Dynamics 365 > Find Tag References) ──
+
+        // Tag sources use singular kinds ("Table/X/TableFieldInt/F", "Class/X/Method/m"); map them to element types.
+        private static readonly Dictionary<string, string> SourceKindToType = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
+        {
+            { "Class", "AxClass" }, { "Table", "AxTable" }, { "Form", "AxForm" }, { "View", "AxView" }, { "Query", "AxQuery" },
+            { "DataEntityView", "AxDataEntityView" }, { "Map", "AxMap" }, { "Enum", "AxEnum" }, { "Menu", "AxMenu" },
+            { "MenuItemDisplay", "AxMenuItemDisplay" }, { "MenuItemAction", "AxMenuItemAction" }, { "MenuItemOutput", "AxMenuItemOutput" },
+            { "TableExtension", "AxTableExtension" }, { "FormExtension", "AxFormExtension" }, { "SecurityPrivilege", "AxSecurityPrivilege" },
+        };
+
         private Health GetHealth()
         {
             lock (_lock)
@@ -336,17 +401,45 @@ namespace XppAiCopilotCompanion.McpServer
             bool more = rows.Count > max;
             var shown = rows.Take(max).ToList();
             sb.AppendLine((more ? "First " + max : shown.Count.ToString()) + " reference(s), grouped by referencing object:");
+            var loaded = LoadedPackages();
+            bool anyUnreadable = false;
             foreach (var group in shown.GroupBy(r => ObjectKey(r.Source)))
             {
                 var first = group.First();
-                sb.AppendLine("  " + DescribeObject(first.Source) + "  [" + first.Module + "]");
+                bool readable = loaded.Count == 0 || loaded.Contains(first.Module ?? "");
+                anyUnreadable |= !readable;
+                sb.AppendLine("  " + DescribeObject(first.Source) + "  [" + first.Module + "]"
+                    + (readable ? "" : "  (package not in the local metadata: cannot be read with xpp_read_object)"));
                 foreach (var r in group)
                     sb.AppendLine("    " + Member(r.Source) + " line " + r.Line + ": " + KindName(r.Kind)
                         + " -> " + Member(r.Target, objectLevel: "(type)"));
             }
+            if (anyUnreadable)
+                sb.AppendLine("Packages marked as not local (typically test packages) are indexed in the cross-reference database but their source is not installed with the metadata.");
             if (more)
                 sb.AppendLine("More references exist. Narrow with memberName or referenceKind, or raise maxResults (max " + MaxMax + ").");
             return sb.ToString().TrimEnd();
+        }
+
+        private static HashSet<string> _loadedPackages;
+
+        // Packages whose metadata is on this machine (folders under the custom and reference metadata roots).
+        private static HashSet<string> LoadedPackages()
+        {
+            if (_loadedPackages != null) return _loadedPackages;
+            var set = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            try
+            {
+                var config = DynamicsConfigurationReader.ReadActiveConfiguration();
+                var roots = new List<string>(config.ReferenceMetadataFolders);
+                if (config.HasCustom) roots.Add(config.CustomMetadataFolder);
+                foreach (string root in roots.Where(System.IO.Directory.Exists))
+                    foreach (string dir in System.IO.Directory.GetDirectories(root))
+                        if (System.IO.Directory.Exists(System.IO.Path.Combine(dir, "Descriptor")))
+                            set.Add(System.IO.Path.GetFileName(dir));
+            }
+            catch { }
+            return _loadedPackages = set;
         }
 
         private static void AppendWarnings(StringBuilder sb, Health health)
