@@ -146,7 +146,7 @@
           Condition="'$(VSToolsPath)' != '' AND Exists('$(VSToolsPath)\VSSDK\Microsoft.VsSDK.targets')" />
 
   <!-- Always bump patch version for every build invocation, including direct MSBuild -->
-  <Target Name="RunAutoVersion" BeforeTargets="CoreCompile" Condition="'$(DisableAutoVersion)' != 'true'">
+  <Target Name="RunAutoVersion" BeforeTargets="CoreCompile" Condition="'$(DisableAutoVersion)' != 'true' And '$(DesignTimeBuild)' != 'true'">
     <Exec Command="powershell -NoProfile -ExecutionPolicy Bypass -File &quot;$(MSBuildProjectDirectory)\auto-version.ps1&quot; -AlwaysBumpPatch" />
 
     <!-- Re-load updated version values from Version.props in the same MSBuild process -->
@@ -171,8 +171,10 @@
     </PropertyGroup>
   </Target>
 
-  <!-- Build the MCP server before the main project so its exe is available for VSIX packaging -->
-  <Target Name="BuildMcpServer" BeforeTargets="CoreCompile" DependsOnTargets="RunAutoVersion">
+  <!-- Build the MCP server before the main project so its exe is available for VSIX packaging.
+       Skipped in design-time builds (VS Code C# / VS IntelliSense), which don't compile and would fail copying the exe. -->
+  <Target Name="BuildMcpServer" BeforeTargets="CoreCompile" DependsOnTargets="RunAutoVersion"
+          Condition="'$(DesignTimeBuild)' != 'true'">
     <MSBuild Projects="$(MSBuildProjectDirectory)\mcp-server\XppMcpServer.csproj"
              Targets="Rebuild"
              Properties="Configuration=$(Configuration)" />
