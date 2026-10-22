@@ -58,7 +58,7 @@ All 19 base types are created via the typed MetaModel API:
 | Object Type | Read | Create | Update | Validate | Status |
 |---|:---:|:---:|:---:|:---:|---|
 | AxClass | ✅ | ✅ | ✅ | ✅ | Fully tested |
-| AxTable | ✅ | ✅ | ✅ | ✅ | Fully tested |
+| AxTable | ✅ | ✅ | ✅ | ✅ | Fully tested. Change own fields with updateFields (EDT, label, help text, properties; the base type never changes), remove fields/indexes/field groups/relations; best-practice warnings after every save |
 | AxView | ✅ | ✅ | ✅ | ✅ | Fully tested |
 | AxDataEntityView | ✅ | ✅ | ✅ | ✅ | Fully tested |
 | AxEdt | ✅ | ✅ | ✅ | ✅ | Fully tested |
@@ -85,7 +85,7 @@ All 19 base types are created via the typed MetaModel API:
 
 | Extension Type | Read | Create | Update | Validate | What can be changed |
 |---|:---:|:---:|:---:|:---:|---|
-| AxTableExtension | ✅ | ✅ | ✅ | ✅ | Add fields, indexes, field groups, relations; property modifications |
+| AxTableExtension | ✅ | ✅ | ✅ | ✅ | Add fields, indexes, field groups, relations; property modifications; change or remove its own fields, indexes, field groups and relations (updateFields, remove*) |
 | AxEnumExtension | ✅ | ✅ | ✅ | ✅ | Add enum values; property modifications |
 | AxEdtExtension | ✅ | ✅ | ✅ | ✅ | Property modifications |
 | AxFormExtension | ✅ | ✅ | ✅ | ✅ | Add controls with explicit placement (parent + begin/end/after), data sources; control property modifications (base/other-extension controls, D365FO-modifiable properties only); update, move and remove the extension's own controls (`updateControls`, `removeControls`, `removeControlModifications`) |

@@ -88,10 +88,18 @@ Recovery rule:
 - A create or update that returns an error was not (fully) applied: read the message, fix the payload and retry. Never assume success.
 - In typedMetadata, give "$type" for items of polymorphic collections (e.g. AxDataEntityViewMappedField), as xpp_read_object shows them.
 
+Tables and table extensions:
+- Change fields the object defines with updateFields (EDT, enumType, label, helpText, properties). The base type of a field never changes (Int to String breaks the database sync): for another type add a new field with another name and remove the old one with removeFields. A removed field name never comes back with another base type.
+- Remove indexes, field groups and relations with removeIndexes / removeFieldGroups / removeRelations; giving an existing index, field group or relation again by name replaces it. Mark the natural-key index with alternateKey.
+
+Best practices:
+- Every plan includes a best-practice review of each object (labels, EDTs, keys and caching, security for menu items, code rules).
+- Create and update results end with "Best-practice warnings": fix each one, or say in the summary why it stays.
+
 Form extensions:
 - controlModifications only for controls of the base form or other extensions, and only for properties D365FO allows (Visible, Enabled, AllowEdit, Label, Caption, HelpText, ...).
 - Change, move or remove the extension's own controls with updateControls / removeControls; drop bad modifications with removeControlModifications. Never delete and recreate the extension for this.
-- New controls get the values their pattern requires; a change the build would reject is refused with the build's message, so follow the Pattern guidance from xpp_get_form_layout.
+- New controls get the pattern their place expects (e.g. FieldsFieldGroups for a new tab page) and the values that pattern requires, also when Pattern is set later with updateControls; an unknown PatternVersion becomes the latest; a change the build would reject is refused with the build's message, so follow the Pattern guidance from xpp_get_form_layout.
 
 ## Invocation Correctness
 
