@@ -102,6 +102,7 @@ namespace XppAiCopilotCompanion.MetaModel
                 case "AxSecurityDutyExtension":
                 case "AxSecurityRoleExtension":
                 case "AxDataEntityViewExtension":
+                case "AxCompositeDataEntityView":
                     return true;
                 default:
                     return false;
@@ -122,6 +123,9 @@ namespace XppAiCopilotCompanion.MetaModel
             {
                 string preError = PreValidateCreate(request);
                 if (preError != null) return Fail(preError);
+                if (request.ObjectType != "AxLabelFile" && ObjectExists(request.ObjectType, request.ObjectName))
+                    return Fail(request.ObjectType + " '" + request.ObjectName + "' already exists (model "
+                        + ModelOf(request.ObjectType, request.ObjectName) + "). Nothing was changed; use xpp_update_object to modify it.");
 
                 if (request.ObjectType == "AxTable" || request.ObjectType == "AxTableExtension")
                 {
@@ -161,6 +165,7 @@ namespace XppAiCopilotCompanion.MetaModel
                     case "AxDataEntityViewExtension": result = CreateDataEntityViewExtension(request, saveInfo); break;
                     case "AxLabelFile":      result = CreateLabelFile(request, saveInfo); break;
                     case "AxMenuExtension":  result = CreateMenuExtension(request, saveInfo); break;
+                    case "AxCompositeDataEntityView": result = CreateCompositeDataEntityView(request, saveInfo); break;
 
                     default:
                         result = Fail("Unsupported object type: " + request.ObjectType); break;
@@ -262,6 +267,8 @@ namespace XppAiCopilotCompanion.MetaModel
                         result = UpdateDataEntityViewExtension(request); break;
                     case "AxMenuExtension":
                         result = UpdateMenuExtension(request); break;
+                    case "AxCompositeDataEntityView":
+                        result = UpdateCompositeDataEntityView(request); break;
                     default:
                         result = UpdateGenericByTypedApi(request); break;
                 }
@@ -863,6 +870,13 @@ namespace XppAiCopilotCompanion.MetaModel
             bool hasProject = activeProjectNode != null;
             result.InProject = hasProject && activeProjectNode.Contains(req.ObjectType, req.ObjectName);
 
+            // Only objects of the project's own model can be in the project; for others (standard, other packages)
+            // membership is not a requirement.
+            string projectModel = hasProject ? activeProjectNode.GetProjectsModelInfo()?.Name : null;
+            string objectModel = string.IsNullOrEmpty(readResult.ModelName) ? ModelOf(req.ObjectType, req.ObjectName) : readResult.ModelName;
+            bool membershipApplies = hasProject && (string.IsNullOrEmpty(projectModel) || string.IsNullOrEmpty(objectModel)
+                || string.Equals(projectModel, objectModel, StringComparison.OrdinalIgnoreCase));
+
             // 3. Compare expected vs actual properties
             var mismatches = new List<string>();
 
@@ -877,7 +891,18 @@ namespace XppAiCopilotCompanion.MetaModel
                     try
                     {
                         object expected = ParseTypedMetadataToNode(req.ObjectType, req.TypedMetadataJson);
-                        object actual = ParseTypedMetadataToNode(req.ObjectType, readResult.TypedMetadataJson);
+                        // With "$type" the request may set subtype properties that the proxy-based read omits;
+                        // compare against the object's full graph then.
+                        string actualJson = readResult.TypedMetadataJson;
+                        object actual = null;
+                        if (req.TypedMetadataJson.Contains("\"$type\""))
+                        {
+                            object live = ReadViaMetadataProvider(req.ObjectType, req.ObjectName, out _);
+                            string full = live != null ? BuildFullGraphJson(live) : null;
+                            if (full != null)
+                                actual = new JavaScriptSerializer { MaxJsonLength = int.MaxValue, RecursionLimit = 64 }.DeserializeObject(full);
+                        }
+                        if (actual == null) actual = ParseTypedMetadataToNode(req.ObjectType, actualJson);
                         ValidateMetadataSubset(expected, actual, "typedMetadata", mismatches, 0);
                     }
                     catch (Exception ex)
@@ -1096,10 +1121,13 @@ namespace XppAiCopilotCompanion.MetaModel
             }
 
             result.Mismatches = mismatches;
-            result.Valid = (result.InProject || !hasProject) && mismatches.Count == 0;
-            string projectNote = hasProject
-                ? (result.InProject ? " Object is in project " + activeProjectNode.Caption + "." : "")
-                : " Project membership NOT checked: no active project (set one with xpp_select_project).";
+            result.Valid = (result.InProject || !membershipApplies) && mismatches.Count == 0;
+            string projectNote = !hasProject
+                ? " Project membership NOT checked: no active project (set one with xpp_select_project)."
+                : !membershipApplies
+                    ? " Project membership not checked: the object belongs to model " + objectModel + ", and project "
+                      + activeProjectNode.Caption + " holds objects of model " + projectModel + " only."
+                    : (result.InProject ? " Object is in project " + activeProjectNode.Caption + "." : "");
             if (result.Valid)
             {
                 result.Message = "Validation passed. All specified metadata is present." + projectNote;
@@ -1144,6 +1172,8 @@ namespace XppAiCopilotCompanion.MetaModel
 
                 foreach (var kv in expDict)
                 {
+                    // "$type" names the concrete subtype; the actual graph carries it only for polymorphic members.
+                    if (kv.Key == "$type" || kv.Key == "__type") continue;
                     if (!actDict.TryGetValue(kv.Key, out object actVal))
                     {
                         mismatches.Add(path + "." + kv.Key + ": missing");
@@ -1317,9 +1347,29 @@ namespace XppAiCopilotCompanion.MetaModel
                     : "Search error in FindObject (searching for '" + objectName + "' in type '" + objectType + "'): " + svcContext + " - " + ex.Message;
             }
 
+            // Security objects are named by their label in requirements: match the label text too (#46).
+            if (!exactMatch && result.Success && !string.IsNullOrEmpty(objectType) && LabelSearchTypes.Contains(objectType)
+                && !string.IsNullOrWhiteSpace(objectName))
+            {
+                var index = SecurityLabelIndex(objectType);
+                foreach (var m in result.Matches)
+                    if (index.TryGetValue(m.ObjectName, out string own)) m.Label = own;
+                var hits = FindSecurityByLabel(objectType, objectName.Trim(), maxResults, out bool allWords);
+                if (hits.Count > 0 && !allWords && result.Matches.Count == 0)
+                    result.Message = "No " + objectType + " name or label contains all of '" + objectName.Trim()
+                        + "'; closest labels below. Requirements often use other wording: check the label and the duties/privileges before choosing.";
+                foreach (var hit in hits)
+                {
+                    if (result.Matches.Count >= maxResults) break;
+                    if (result.Matches.Any(m => string.Equals(m.ObjectName, hit.Key, StringComparison.OrdinalIgnoreCase))) continue;
+                    string modelName = GetObjectModelName(objectType, hit.Key);
+                    result.Matches.Add(new FoundObject { ObjectType = objectType, ObjectName = hit.Key, ModelName = modelName, IsCustom = IsCustomModel(modelName), Label = hit.Value });
+                }
+            }
+
             if (budgetExceeded)
                 result.Message = BudgetExceededMessage(result.Matches.Count);
-            else if (result.Matches.Count == 0 && result.Success)
+            else if (result.Matches.Count == 0 && result.Success && result.Message == null)
                 result.Message = "No objects found matching '" + objectName + "'."
                     + (string.IsNullOrEmpty(objectType) ? "" : " (type: " + objectType + ")");
 
@@ -1795,6 +1845,116 @@ namespace XppAiCopilotCompanion.MetaModel
         }
 
         // ── Project ──
+
+        private static readonly System.Text.RegularExpressions.Regex LabelIdPattern =
+            new System.Text.RegularExpressions.Regex(@"^[A-Za-z_][A-Za-z0-9_]*$");
+
+        /// <summary>
+        /// Creates several labels (each with optional translations). Every language's label file is read once and
+        /// written once. Same ID with the same text is reported as unchanged; same ID with another text fails.
+        /// </summary>
+        public MetaModelResult CreateLabels(string labelFileId, string language, List<LabelRequestDto> labels)
+        {
+            ThreadHelper.ThrowIfNotOnUIThread();
+            if (MetaService == null) return Fail("MetaModel service not available.");
+            if (labels == null || labels.Count == 0) return Fail("No labels given.");
+            string baseLanguage = string.IsNullOrWhiteSpace(language) ? "en-US" : language.Trim();
+
+            var lines = new List<string>();
+            bool failed = false;
+            var perLanguage = new Dictionary<string, List<KeyValuePair<LabelRequestDto, string>>>(StringComparer.OrdinalIgnoreCase);
+            var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            foreach (var label in labels)
+            {
+                string id = label.LabelId?.Trim();
+                if (string.IsNullOrEmpty(id) || !LabelIdPattern.IsMatch(id))
+                {
+                    lines.Add("FAILED '" + label.LabelId + "': the label ID must be letters, digits or _ (e.g. HSRemovalStatus).");
+                    failed = true;
+                    continue;
+                }
+                if (string.IsNullOrWhiteSpace(label.Text))
+                {
+                    lines.Add("FAILED " + id + ": text is required.");
+                    failed = true;
+                    continue;
+                }
+                if (!seen.Add(id))
+                {
+                    lines.Add("FAILED " + id + ": listed more than once in this call.");
+                    failed = true;
+                    continue;
+                }
+                label.LabelId = id;
+                AddFor(perLanguage, baseLanguage, label, label.Text);
+                foreach (var t in label.Translations ?? new Dictionary<string, string>())
+                {
+                    if (string.IsNullOrWhiteSpace(t.Value)) { lines.Add("FAILED " + id + " " + t.Key + ": empty translation."); failed = true; continue; }
+                    AddFor(perLanguage, t.Key, label, t.Value);
+                }
+            }
+
+            var outcome = new Dictionary<string, List<string>>(StringComparer.OrdinalIgnoreCase);
+            foreach (var group in perLanguage)
+            {
+                try
+                {
+                    // One AxLabelFile per language ("<Id>_<lang>"); the base language may also be the plain ID.
+                    var labelFile = MetaService.GetLabelFile(labelFileId + "_" + group.Key)
+                        ?? (string.Equals(group.Key, baseLanguage, StringComparison.OrdinalIgnoreCase) ? MetaService.GetLabelFile(labelFileId) : null);
+                    string fileError = labelFile == null
+                        ? "label file '" + labelFileId + "' has no " + group.Key + " language (create it with xpp_create_object AxLabelFile, properties.Languages)"
+                        : null;
+                    var controller = labelFile == null ? null
+                        : new LabelControllerFactory().GetOrCreateLabelController(labelFile, new VSApplicationContext(CoreUtility.ServiceProvider));
+                    int inserted = 0;
+                    foreach (var item in group.Value)
+                    {
+                        string state;
+                        if (fileError != null) { state = "FAILED (" + fileError + ")"; failed = true; }
+                        else if (controller.Exists(item.Key.LabelId))
+                        {
+                            string current = TryGetLabelText(controller, item.Key.LabelId);
+                            if (string.Equals(current, item.Value, StringComparison.Ordinal)) state = "unchanged (already there)";
+                            else { state = "FAILED (already exists with text '" + current + "')"; failed = true; }
+                        }
+                        else
+                        {
+                            controller.Insert(item.Key.LabelId, item.Value, item.Key.Comment ?? string.Empty);
+                            inserted++;
+                            state = "created";
+                        }
+                        Outcome(outcome, item.Key.LabelId).Add(group.Key + " " + state + (state == "created" ? ": " + item.Value : ""));
+                    }
+                    if (inserted > 0) controller.Save();
+                }
+                catch (Exception ex)
+                {
+                    failed = true;
+                    foreach (var item in group.Value)
+                        Outcome(outcome, item.Key.LabelId).Add(group.Key + " FAILED (" + ex.Message + ")");
+                }
+            }
+
+            foreach (var label in labels.Where(l => outcome.ContainsKey(l.LabelId ?? "")))
+                lines.Add("@" + labelFileId + ":" + label.LabelId + " - " + string.Join("; ", outcome[label.LabelId]));
+            int created = outcome.Values.SelectMany(v => v).Count(s => s.Contains(" created"));
+            lines.Insert(0, (failed ? "Some labels failed. " : "") + "Labels in " + labelFileId + ": " + created + " text(s) written, "
+                + perLanguage.Count + " label file(s) touched.");
+            return new MetaModelResult { Success = !failed, Message = string.Join("\n", lines) };
+        }
+
+        private static void AddFor(Dictionary<string, List<KeyValuePair<LabelRequestDto, string>>> map, string language, LabelRequestDto label, string text)
+        {
+            if (!map.TryGetValue(language, out var list)) map[language] = list = new List<KeyValuePair<LabelRequestDto, string>>();
+            list.Add(new KeyValuePair<LabelRequestDto, string>(label, text));
+        }
+
+        private static List<string> Outcome(Dictionary<string, List<string>> map, string id)
+        {
+            if (!map.TryGetValue(id, out var list)) map[id] = list = new List<string>();
+            return list;
+        }
 
         public MetaModelResult AddToProject(string objectType, string objectName)
         {
@@ -2900,6 +3060,9 @@ namespace XppAiCopilotCompanion.MetaModel
             if (!string.IsNullOrWhiteSpace(req.TypedMetadataJson))
             {
                 ApplyTypedMetadataGraph(target, req.ObjectType, req.TypedMetadataJson);
+                // properties given next to typedMetadata (or to rootDataEntities) still apply.
+                if (req.Properties != null && req.Properties.Count > 0 && !ApplyPropertyModifications(target, req.Properties))
+                    ApplyProperties(target, req.Properties);
                 return;
             }
 
@@ -2937,6 +3100,9 @@ namespace XppAiCopilotCompanion.MetaModel
             if (!string.IsNullOrWhiteSpace(req.TypedMetadataJson))
             {
                 ApplyTypedMetadataGraph(target, req.ObjectType, req.TypedMetadataJson);
+                // properties given next to typedMetadata (or to rootDataEntities) still apply.
+                if (req.Properties != null && req.Properties.Count > 0 && !ApplyPropertyModifications(target, req.Properties))
+                    ApplyProperties(target, req.Properties);
                 return;
             }
 
@@ -2973,6 +3139,7 @@ namespace XppAiCopilotCompanion.MetaModel
         private static void ApplyTypedMetadataGraph(object target, string objectType, string typedMetadataJson)
         {
             if (target == null || string.IsNullOrWhiteSpace(typedMetadataJson)) return;
+            CheckTypedMetadataKeys(target.GetType(), typedMetadataJson);
 
             try
             {
@@ -3007,7 +3174,9 @@ namespace XppAiCopilotCompanion.MetaModel
                 RecursionLimit = 64
             };
 
-            Type proxyType = ResolveProxyType(objectType);
+            // Proxies model only the base types; "$type" (as written by xpp_read_object) names a subtype whose
+            // extra properties (e.g. DataField of AxDataEntityViewMappedField) the proxy would drop.
+            Type proxyType = typedMetadataJson.Contains("\"$type\"") ? null : ResolveProxyType(objectType);
             if (proxyType != null)
             {
                 object proxyObj = serializer.Deserialize(typedMetadataJson, proxyType);
@@ -3075,11 +3244,15 @@ namespace XppAiCopilotCompanion.MetaModel
                 try { child = prop.GetValue(target); } catch { }
 
                 // Support nested metadata on read-only properties when they expose an existing object.
+                string wantedType = Convert.ToString(GetNodeValue(childNode, "$type"));
+                if (child != null && !string.IsNullOrEmpty(wantedType)
+                    && !string.Equals(child.GetType().Name, wantedType, StringComparison.OrdinalIgnoreCase))
+                    child = prop.CanWrite ? CreateNodeInstance(propType, childNode) : child;
                 if (child == null)
                 {
                     if (!prop.CanWrite) continue;
-                    child = CreateDefaultInstance(propType);
-                    if (child == null) continue;
+                    try { child = CreateNodeInstance(propType, childNode); }
+                    catch when (string.IsNullOrEmpty(wantedType)) { continue; }
                 }
 
                 ApplyObjectNode(child, childNode);
@@ -3128,12 +3301,9 @@ namespace XppAiCopilotCompanion.MetaModel
                     }
                     if (childDict != null)
                     {
-                        object item = CreateDefaultInstance(itemType);
-                        if (item != null)
-                        {
-                            ApplyObjectNode(item, childDict);
-                            addValue = item;
-                        }
+                        object item = CreateNodeInstance(itemType, childDict);
+                        ApplyObjectNode(item, childDict);
+                        addValue = item;
                     }
                 }
 
@@ -3375,6 +3545,119 @@ namespace XppAiCopilotCompanion.MetaModel
             }
         }
 
+        private static readonly Dictionary<string, Type> _subtypeCache = new Dictionary<string, Type>(StringComparer.OrdinalIgnoreCase);
+
+        // Rejects typedMetadata keys that are not properties of the target type (or of the "$type" subtype), so a
+        // misspelled or unsupported key fails the call instead of being dropped without a trace.
+        private static void CheckTypedMetadataKeys(Type targetType, string typedMetadataJson)
+        {
+            var serializer = new JavaScriptSerializer { MaxJsonLength = int.MaxValue, RecursionLimit = 64 };
+            var unknown = new List<string>();
+            CollectUnknownKeys(targetType, serializer.DeserializeObject(typedMetadataJson) as Dictionary<string, object>, "typedMetadata", unknown, 0);
+            if (unknown.Count > 0)
+                throw new InvalidOperationException("unknown properties: " + string.Join(", ", unknown.Take(20))
+                    + ". Check the names with xpp_get_object_type_schema or xpp_read_object. Nothing was applied.");
+        }
+
+        private static void CollectUnknownKeys(Type type, Dictionary<string, object> node, string path, List<string> unknown, int depth)
+        {
+            if (type == null || node == null || depth > 12) return;
+            string typeName = Convert.ToString(GetNodeValue(node, "$type", "__type"));
+            if (!string.IsNullOrWhiteSpace(typeName))
+            {
+                Type sub = ResolveSubtype(type, typeName.Trim());
+                if (sub == null) { unknown.Add(path + ".$type (" + typeName + " is not a " + type.Name + ")"); return; }
+                type = sub;
+            }
+            foreach (var kv in node)
+            {
+                if (kv.Key == "$type" || kv.Key == "__type") continue;
+                var prop = FindProperty(type, kv.Key);
+                if (prop == null) { unknown.Add(path + "." + kv.Key); continue; }
+                Type propType = Nullable.GetUnderlyingType(prop.PropertyType) ?? prop.PropertyType;
+                if (kv.Value is Dictionary<string, object> child)
+                {
+                    CollectUnknownKeys(propType, child, path + "." + kv.Key, unknown, depth + 1);
+                }
+                else if (kv.Value is object[] || kv.Value is System.Collections.ArrayList)
+                {
+                    Type itemType = TypedCollectionItemType(propType);
+                    var items = ToObjectArray(kv.Value) ?? new object[0];
+                    for (int i = 0; i < items.Length; i++)
+                        if (items[i] is Dictionary<string, object> itemNode && itemType != null)
+                            CollectUnknownKeys(itemType, itemNode, path + "." + kv.Key + "[" + i + "]", unknown, depth + 1);
+                }
+            }
+        }
+
+        private static Type TypedCollectionItemType(Type collectionType)
+        {
+            Type fallback = null;
+            foreach (var m in collectionType.GetMethods(BindingFlags.Public | BindingFlags.Instance))
+            {
+                if (m.Name != "Add" || m.IsGenericMethod) continue;
+                var ps = m.GetParameters();
+                if (ps.Length != 1) continue;
+                if (ps[0].ParameterType != typeof(object)) return ps[0].ParameterType;
+                fallback = ps[0].ParameterType;
+            }
+            return fallback == typeof(object) ? null : fallback;
+        }
+
+        // Instance for a typed-metadata node: the concrete type named by "$type" (must derive from baseType), else baseType.
+        // Throws instead of skipping, so a payload is never saved with parts silently dropped.
+        private static object CreateNodeInstance(Type baseType, Dictionary<string, object> node)
+        {
+            string typeName = Convert.ToString(GetNodeValue(node, "$type", "__type"));
+            Type concrete = baseType;
+            if (!string.IsNullOrWhiteSpace(typeName))
+            {
+                concrete = ResolveSubtype(baseType, typeName.Trim());
+                if (concrete == null)
+                    throw new InvalidOperationException("\"$type\": \"" + typeName + "\" is not a " + baseType.Name
+                        + " type. Use one of: " + string.Join(", ", ListConcreteSubtypes(baseType)) + ".");
+            }
+            object instance = CreateDefaultInstance(concrete);
+            if (instance == null)
+            {
+                string name = Convert.ToString(GetNodeValue(node, "Name", "name"));
+                throw new InvalidOperationException(baseType.Name + " is abstract, so the item"
+                    + (string.IsNullOrEmpty(name) ? "" : " '" + name + "'")
+                    + " needs \"$type\" with its concrete type: one of " + string.Join(", ", ListConcreteSubtypes(baseType)) + ".");
+            }
+            return instance;
+        }
+
+        private static Type ResolveSubtype(Type baseType, string typeName)
+        {
+            string key = baseType.FullName + "|" + typeName;
+            lock (_subtypeCache)
+            {
+                if (_subtypeCache.TryGetValue(key, out Type cached)) return cached;
+            }
+            Type found = string.Equals(baseType.Name, typeName, StringComparison.OrdinalIgnoreCase) ? baseType : null;
+            if (found == null)
+            {
+                foreach (Type t in CandidateSubtypes(baseType))
+                    if (string.Equals(t.Name, typeName, StringComparison.OrdinalIgnoreCase)) { found = t; break; }
+            }
+            lock (_subtypeCache) { _subtypeCache[key] = found; }
+            return found;
+        }
+
+        private static IEnumerable<string> ListConcreteSubtypes(Type baseType)
+        {
+            return CandidateSubtypes(baseType).Where(t => !t.IsAbstract).Select(t => t.Name).OrderBy(n => n).Take(40);
+        }
+
+        private static IEnumerable<Type> CandidateSubtypes(Type baseType)
+        {
+            Type[] types;
+            try { types = baseType.Assembly.GetTypes(); }
+            catch (ReflectionTypeLoadException ex) { types = ex.Types.Where(t => t != null).ToArray(); }
+            return types.Where(t => t.IsClass && t.IsPublic && baseType.IsAssignableFrom(t));
+        }
+
         private static PropertyInfo FindProperty(Type type, string name)
         {
             return type.GetProperty(name, BindingFlags.Public | BindingFlags.Instance | BindingFlags.IgnoreCase);
@@ -3503,8 +3786,26 @@ namespace XppAiCopilotCompanion.MetaModel
             TrySetPropertyValue(ds, dto.ParentDataSource, "ParentDataSource", "JoinDataSource", "Parent");
             TrySetPropertyValue(ds, dto.JoinMode, "JoinMode");
             TrySetPropertyValue(ds, dto.LinkType, "LinkType");
-            if (dto.DynamicFields.HasValue)
-                TrySetPropertyValue(ds, dto.DynamicFields.Value ? "true" : "false", "DynamicFields");
+            // An empty field list with Dynamic Fields = No fails the build (FieldListEmpty).
+            bool hasFields = dto.Fields != null && dto.Fields.Count > 0;
+            if (dto.DynamicFields == false && !hasFields)
+                throw new InvalidOperationException("data source '" + (dto.Name ?? dto.Table) + "': dynamicFields is false but no fields are given "
+                    + "(the build would fail with FieldListEmpty). Pass fields: [\"Field1\", ...] or set dynamicFields to true.");
+            bool dynamic = dto.DynamicFields ?? !hasFields;
+            TrySetPropertyValue(ds, dynamic ? "true" : "false", "DynamicFields");
+            if (hasFields && FindProperty(ds.GetType(), "Fields")?.GetValue(ds) is object fieldCollection)
+            {
+                var addField = SingleItemAddMethod(fieldCollection.GetType());
+                Type fieldType = addField?.GetParameters()[0].ParameterType;
+                foreach (string fieldName in dto.Fields.Where(f => !string.IsNullOrWhiteSpace(f)))
+                {
+                    object field = fieldType == null ? null : CreateDefaultInstance(fieldType);
+                    if (field == null) throw new InvalidOperationException("query data source fields cannot be created through the metadata API.");
+                    TrySetPropertyValue(field, fieldName, "Name");
+                    TrySetPropertyValue(field, fieldName, "Field", "DataField");
+                    addField.Invoke(fieldCollection, new[] { field });
+                }
+            }
             if (dto.Relations.HasValue)
                 TrySetPropertyValue(ds, dto.Relations.Value ? "true" : "false", "Relations");
             if (dto.FirstOnly.HasValue)
@@ -3794,6 +4095,12 @@ namespace XppAiCopilotCompanion.MetaModel
             dto.DynamicFields = ReadBoolProperty(ds, "DynamicFields");
             dto.Relations = ReadBoolProperty(ds, "Relations");
             dto.FirstOnly = ReadBoolProperty(ds, "FirstOnly");
+            if (ds.GetType().GetProperty("Fields")?.GetValue(ds) is System.Collections.IEnumerable dsFields)
+            {
+                var names = dsFields.Cast<object>().Select(f => ReadStringProperty(f, "Field", "DataField", "Name"))
+                    .Where(n => !string.IsNullOrEmpty(n)).ToList();
+                if (names.Count > 0) dto.Fields = names;
+            }
 
             var rangesProp = ds.GetType().GetProperty("Ranges");
             var ranges = rangesProp?.GetValue(ds) as System.Collections.IEnumerable;

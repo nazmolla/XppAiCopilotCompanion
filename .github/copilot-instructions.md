@@ -42,15 +42,15 @@ Discovery and context:
 - xpp_get_environment
 - xpp_list_models
 - xpp_get_model_info
-- xpp_find_object
+- xpp_find_object (security roles, duties and privileges are also found by label text, e.g. "Sales manager"; check the closest labels when requirements use other wording)
 - xpp_list_objects
 - xpp_list_model_objects
 - xpp_find_references
 - xpp_get_object_type_schema
-- xpp_get_form_layout (survey a form with all extensions merged before placing form-extension controls)
+- xpp_get_form_layout (survey a form with all extensions merged before placing form-extension controls; its "Pattern guidance" lists the children each container's pattern expects)
 
 Metadata CRUD:
-- xpp_read_object
+- xpp_read_object (large objects return a summary first; ask for parts with sections, e.g. ["properties","dataSources","fields"])
 - xpp_create_object
 - xpp_update_object
 - xpp_validate_object
@@ -62,7 +62,7 @@ Project and labels:
 - xpp_remove_from_project (exclude from the project; the object stays in the model)
 - xpp_list_project_items
 - xpp_read_label
-- xpp_create_label
+- xpp_create_label (pass all labels of a task in one call with the labels array, each with translations)
 
 Build:
 - xpp_build (LabelC + X++ compile; returns every error and warning)
@@ -85,6 +85,13 @@ Disallowed formats:
 
 Recovery rule:
 - If a tool rejects payload format, convert to plain JSON plus plain X++ strings and retry.
+- A create or update that returns an error was not (fully) applied: read the message, fix the payload and retry. Never assume success.
+- In typedMetadata, give "$type" for items of polymorphic collections (e.g. AxDataEntityViewMappedField), as xpp_read_object shows them.
+
+Form extensions:
+- controlModifications only for controls of the base form or other extensions, and only for properties D365FO allows (Visible, Enabled, AllowEdit, Label, Caption, HelpText, ...).
+- Change, move or remove the extension's own controls with updateControls / removeControls; drop bad modifications with removeControlModifications. Never delete and recreate the extension for this.
+- New controls get the values their pattern requires; a change the build would reject is refused with the build's message, so follow the Pattern guidance from xpp_get_form_layout.
 
 ## Invocation Correctness
 

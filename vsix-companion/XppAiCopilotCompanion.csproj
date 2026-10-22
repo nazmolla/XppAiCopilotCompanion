@@ -101,6 +101,18 @@
       <HintPath>Samples\Microsoft.Dynamics.FinOps.ToolsVS2022\Microsoft.Dynamics.AX.Metadata.Core.dll</HintPath>
       <Private>false</Private>
     </Reference>
+    <Reference Include="Microsoft.Dynamics.AX.Metadata.Patterns">
+      <HintPath>Samples\Microsoft.Dynamics.FinOps.ToolsVS2022\Microsoft.Dynamics.AX.Metadata.Patterns.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+    <Reference Include="Microsoft.Dynamics.AX.Metadata.Validation">
+      <HintPath>Samples\Microsoft.Dynamics.FinOps.ToolsVS2022\Microsoft.Dynamics.AX.Metadata.Validation.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+    <Reference Include="Microsoft.Dynamics.AX.Framework.Xlnt.XppCore">
+      <HintPath>Samples\Microsoft.Dynamics.FinOps.ToolsVS2022\Microsoft.Dynamics.AX.Framework.Xlnt.XppCore.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
     <Reference Include="Microsoft.Dynamics.AX.Metadata.Storage">
       <HintPath>Samples\Microsoft.Dynamics.FinOps.ToolsVS2022\Microsoft.Dynamics.AX.Metadata.Storage.dll</HintPath>
       <Private>false</Private>

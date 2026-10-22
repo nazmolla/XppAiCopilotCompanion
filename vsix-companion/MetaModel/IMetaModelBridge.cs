@@ -33,6 +33,7 @@ namespace XppAiCopilotCompanion.MetaModel
 
         LabelResult ReadLabel(string labelFileId, string language, string labelId, string searchText, int maxResults);
         MetaModelResult CreateLabel(string labelFileId, string language, string labelId, string text, string comment);
+        MetaModelResult CreateLabels(string labelFileId, string language, List<LabelRequestDto> labels);
 
         // ── Project ──
 

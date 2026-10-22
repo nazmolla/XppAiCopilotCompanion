@@ -28,11 +28,11 @@ A standalone MCP (Model Context Protocol) server (`XppMcpServer.exe`) exposes 22
 
 | Tool | Description |
 |---|---|
-| `xpp_create_object` | Create any of 19 base object types, extensions (table, enum, EDT, form, menu, data entity, security), label files and menu extensions, with strongly-typed JSON metadata. All-or-nothing: relations are checked before saving, a failed metadata apply rolls the object back, the object is added to the active project and the response ends with a `Validation:` line |
-| `xpp_read_object` | Read object declaration, methods, and typed metadata (properties, fields, indexes, etc.) |
+| `xpp_create_object` | Create any of 19 base object types, extensions (table, enum, EDT, form, menu, data entity, security), composite data entities, label files and menu extensions, with strongly-typed JSON metadata. All-or-nothing: relations are checked before saving, a failed metadata apply rolls the object back, an existing name is never overwritten, the object is added to the active project and the response ends with a `Validation:` line; a failed validation returns an error |
+| `xpp_read_object` | Read object declaration, methods, and typed metadata (properties, fields, indexes, etc.). Objects over 25,000 characters return a summary first; `sections` returns only the parts you need |
 | `xpp_update_object` | Update declaration, methods, or metadata on existing custom objects |
-| `xpp_validate_object` | Validate that an object exists, is in the project, and has the expected metadata |
-| `xpp_find_object` | Search for objects by name pattern and type |
+| `xpp_validate_object` | Validate that an object exists and has the expected metadata; project membership is required only for objects of the project's model |
+| `xpp_find_object` | Search for objects by name pattern and type; security roles, duties and privileges also by their label text (closest labels when no exact wording matches) |
 | `xpp_list_objects` | Look up a handful of objects by a specific name substring |
 | `xpp_list_model_objects` | List what one model contains (counts per type, then paged names) — reads the model index on disk, outside VS |
 | `xpp_find_references` | Query the cross-reference database for all objects that use/reference a given object |
@@ -41,12 +41,12 @@ A standalone MCP (Model Context Protocol) server (`XppMcpServer.exe`) exposes 22
 | `xpp_get_model_info` | Get model descriptor (layer, references, dependencies) |
 | `xpp_list_models` | List all installed models with editability status |
 | `xpp_read_label` | Read a label by ID and language |
-| `xpp_create_label` | Create or update a label |
+| `xpp_create_label` | Create labels: one, or many in one call (`labels` array), each with translations; each label file is written once; per-label result (created / unchanged / failed) |
 | `xpp_add_to_project` | Add an existing object to the active VS project |
 | `xpp_list_project_items` | List items in the active VS project |
 | `xpp_get_environment` | Get D365FO environment info (metadata folders, active model) |
 | `xpp_search_docs` | Search Microsoft D365FO documentation (Microsoft Learn semantic search; pages returned as markdown) |
-| `xpp_delete_object` | Delete an object of your own model completely (metadata file and project entry). Refused for standard/ISV objects, and while other objects still reference it unless `force=true` |
+| `xpp_delete_object` | Delete an object of your own model completely (metadata file and project entry) and remove its own cross-reference entries. Refused for standard/ISV objects, and while other objects still reference it unless `force=true` |
 | `xpp_remove_from_project` | Exclude an object from the active project; it stays in the model |
 | `xpp_select_project` | List the D365FO projects of the open solution, or make one active (added to the solution if needed, selected and set as startup project) |
 | `xpp_build` | Build a custom model (LabelC + xppc with cross-references) like Dynamics 365 > Build, and return BUILD SUCCEEDED/FAILED with every error, fatal error and warning; `scope=project` reports only the active project's objects. Runs off the VS UI thread |
@@ -88,9 +88,11 @@ All 19 base types are created via the typed MetaModel API:
 | AxTableExtension | ✅ | ✅ | ✅ | ✅ | Add fields, indexes, field groups, relations; property modifications |
 | AxEnumExtension | ✅ | ✅ | ✅ | ✅ | Add enum values; property modifications |
 | AxEdtExtension | ✅ | ✅ | ✅ | ✅ | Property modifications |
-| AxFormExtension | ✅ | ✅ | ✅ | ✅ | Add controls with explicit placement (parent + begin/end/after), data sources; control property modifications |
+| AxFormExtension | ✅ | ✅ | ✅ | ✅ | Add controls with explicit placement (parent + begin/end/after), data sources; control property modifications (base/other-extension controls, D365FO-modifiable properties only); update, move and remove the extension's own controls (`updateControls`, `removeControls`, `removeControlModifications`) |
+| AxDataEntityViewExtension | ✅ | ✅ | ✅ | ✅ | Add mapped fields (`entityFields` or `typedMetadata.Fields` with `$type`), also when the data source is another entity or a view; the staging table is extended with the underlying table field |
+| AxCompositeDataEntityView | ✅ | ✅ | ✅ | ✅ | `rootDataEntities`: root + embedded entity references with their relation; staging tables checked (RowId/ParentRowId, parent relation) |
 
-Form extensions are survey-first: `xpp_get_form_layout` shows the base form with **all** existing extensions merged (each extension control and data source is attributed). New controls must name a parent and a position; placement is validated against that merged form before anything is saved, and re-verified after saving.
+Form extensions are survey-first: `xpp_get_form_layout` shows the base form with **all** existing extensions merged (each extension control and data source is attributed) and the child structure each container's pattern expects. New controls must name a parent and a position; placement is validated against that merged form before anything is saved, and re-verified after saving. New controls get the property values their form pattern requires, and the compiler's own form-extension validators run after saving: any error the change would add to the build restores the previous version and is returned with the build's text.
 
 #### Strongly-Typed JSON Metadata
 
@@ -109,11 +111,12 @@ Read results return the **same JSON format**, so Copilot can use a read result d
 Other behaviour worth knowing:
 
 - **EDTs**: set `properties.EdtType` (String, Int, Int64, Real, Enum, Date, UtcDateTime, Time, Guid, Container) or `properties.Extends`; the read shows the kind.
-- **Label files**: `xpp_create_object` with `AxLabelFile` and `properties.Languages` (e.g. `en-US,fr-CA`) creates one label file per language; `xpp_create_label` accepts `translations`.
+- **Label files**: `xpp_create_object` with `AxLabelFile` and `properties.Languages` (e.g. `en-US,fr-CA`) creates one label file per language; `xpp_create_label` accepts `translations` and a `labels` array.
+- **`typedMetadata`**: items of polymorphic collections take `"$type"` (as `xpp_read_object` writes them); unknown keys are refused, so nothing is dropped silently. Query data sources default to `dynamicFields` true and accept `fields`.
 - **Menu extensions**: `AxMenuExtension` with `menuElements` (menu item, type, parent submenu, position).
 - **`methods`**: plain X++ source strings, or objects with `source`.
 - **Reads**: data entities include data sources, entity fields and the staging table; `methodNames` returns only the requested methods; only non-default properties are shown.
-- **Validation** compares only the attributes you passed, treats Yes/True and No/False alike, and checks project membership for real.
+- **Validation** compares only the attributes you passed, treats Yes/True and No/False alike, and checks project membership for objects of the project's model.
 - **Find/list** reject unknown types, find data entities and security roles, and say `0 matches` when nothing matches; `xpp_list_model_objects` explains package names that contain several models.
 - **Where-used** marks objects from packages that are not installed locally (typically test packages).
 

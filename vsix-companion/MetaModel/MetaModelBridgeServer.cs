@@ -321,6 +321,7 @@ namespace XppAiCopilotCompanion.MetaModel
 
             // Fallback: Copilot may stuff typed metadata into "metadata" as a JSON string
             error = NormalizeFromMetadata(body, req);
+            if (req.TypedMetadataJson == null) req.TypedMetadataJson = RootDataEntitiesAsTypedMetadata(body);
             if (error != null)
                 return SerializeResult(new MetaModelResult { Success = false, Message = error });
 
@@ -398,7 +399,10 @@ namespace XppAiCopilotCompanion.MetaModel
                 EntityFields = ParseEntityFields(body),
                 MenuElements = ParseMenuElements(body),
                 SkipStagingTable = "true".Equals(ExtractJsonString(body, "skipStagingTable"), StringComparison.OrdinalIgnoreCase),
-                RemoveSecurityItems = ExtractJsonStringArray(body, "removeSecurityItems")?.ToList()
+                RemoveSecurityItems = ExtractJsonStringArray(body, "removeSecurityItems")?.ToList(),
+                UpdateControls = ParseFormControls(body, "updateControls"),
+                RemoveControls = ExtractJsonStringArray(body, "removeControls")?.ToList(),
+                RemoveControlModifications = ExtractJsonStringArray(body, "removeControlModifications")?.ToList()
             };
 
             // Reject any formatted markup in declaration or methods
@@ -409,6 +413,7 @@ namespace XppAiCopilotCompanion.MetaModel
 
             // Fallback: Copilot may stuff typed metadata into "metadata" as a JSON string
             error = NormalizeFromMetadata(body, req);
+            if (req.TypedMetadataJson == null) req.TypedMetadataJson = RootDataEntitiesAsTypedMetadata(body);
             if (error != null)
                 return SerializeResult(new MetaModelResult { Success = false, Message = error });
 
@@ -580,6 +585,7 @@ namespace XppAiCopilotCompanion.MetaModel
                 sb.Append("{\"objectType\":\"" + EscapeJson(m.ObjectType) + "\"");
                 sb.Append(",\"objectName\":\"" + EscapeJson(m.ObjectName) + "\"");
                 sb.Append(",\"modelName\":\"" + EscapeJson(m.ModelName ?? "") + "\"");
+                if (!string.IsNullOrEmpty(m.Label)) sb.Append(",\"label\":\"" + EscapeJson(m.Label) + "\"");
                 sb.Append(",\"isCustom\":" + (m.IsCustom ? "true" : "false") + "}");
             }
             sb.Append("]}");
@@ -691,24 +697,27 @@ namespace XppAiCopilotCompanion.MetaModel
         {
             string labelFileId = ExtractJsonString(body, "labelFileId");
             string language = ExtractJsonString(body, "language");
-            string labelId = ExtractJsonString(body, "labelId");
-            string text = ExtractJsonString(body, "text");
-            string comment = ExtractJsonString(body, "comment");
-            var result = _bridge.CreateLabel(labelFileId, language, labelId, text, comment);
-            var translations = ExtractJsonObject(body, "translations");
-            if (result.Success && translations != null)
-            {
-                var lines = new List<string> { result.Message };
-                foreach (var t in translations)
+            var labels = new List<LabelRequestDto>();
+            string single = ExtractJsonString(body, "labelId");
+            if (!string.IsNullOrEmpty(single))
+                labels.Add(new LabelRequestDto
                 {
-                    var r = _bridge.CreateLabel(labelFileId, t.Key, labelId, t.Value, comment);
-                    lines.Add((r.Success ? "" : "FAILED " + t.Key + ": ") + r.Message);
-                    if (!r.Success) result.Success = false;
-                }
-                result.Message = string.Join("\n", lines);
-            }
-            if (result.Success)
-                result.Message += "\nUse it as @" + labelFileId + ":" + labelId;
+                    LabelId = single,
+                    Text = ExtractJsonString(body, "text"),
+                    Comment = ExtractJsonString(body, "comment"),
+                    Translations = ExtractJsonObject(body, "translations")
+                });
+            string array = ExtractJsonArray(body, "labels");
+            if (array != null)
+                foreach (string obj in SplitJsonObjects(array))
+                    labels.Add(new LabelRequestDto
+                    {
+                        LabelId = ExtractJsonString(obj, "labelId") ?? ExtractJsonString(obj, "id"),
+                        Text = ExtractJsonString(obj, "text"),
+                        Comment = ExtractJsonString(obj, "comment"),
+                        Translations = ExtractJsonObject(obj, "translations")
+                    });
+            var result = _bridge.CreateLabels(labelFileId, language, labels);
             return SerializeResult(result);
         }
 
@@ -1096,6 +1105,8 @@ namespace XppAiCopilotCompanion.MetaModel
                 sb.Append(",\"linkType\":\"" + EscapeJson(ds.LinkType) + "\"");
             if (ds.DynamicFields.HasValue)
                 sb.Append(",\"dynamicFields\":" + (ds.DynamicFields.Value ? "true" : "false"));
+            if (ds.Fields != null && ds.Fields.Count > 0)
+                sb.Append(",\"fields\":[" + string.Join(",", ds.Fields.Select(f => "\"" + EscapeJson(f) + "\"")) + "]");
             if (ds.Relations.HasValue)
                 sb.Append(",\"relations\":" + (ds.Relations.Value ? "true" : "false"));
             if (ds.FirstOnly.HasValue)
@@ -1384,6 +1395,24 @@ namespace XppAiCopilotCompanion.MetaModel
             }
             if (bracketEnd < 0) return null;
             return json.Substring(bracketStart, bracketEnd - bracketStart + 1);
+        }
+
+        // rootDataEntities (AxCompositeDataEntityView) is the typed graph's RootDataEntities with camelCase keys.
+        private static string RootDataEntitiesAsTypedMetadata(string body)
+        {
+            string array = ExtractJsonArray(body, "rootDataEntities");
+            if (array == null) return null;
+            var serializer = new System.Web.Script.Serialization.JavaScriptSerializer { MaxJsonLength = int.MaxValue, RecursionLimit = 64 };
+            object PascalCase(object node)
+            {
+                if (node is Dictionary<string, object> dict)
+                    return dict.ToDictionary(kv => kv.Key.Length > 0 && kv.Key[0] != '$' ? char.ToUpperInvariant(kv.Key[0]) + kv.Key.Substring(1) : kv.Key,
+                        kv => PascalCase(kv.Value));
+                if (node is object[] items) return items.Select(PascalCase).ToArray();
+                if (node is System.Collections.ArrayList list) return list.Cast<object>().Select(PascalCase).ToArray();
+                return node;
+            }
+            return serializer.Serialize(new Dictionary<string, object> { ["RootDataEntities"] = PascalCase(serializer.DeserializeObject(array)) });
         }
 
         private static string ExtractJsonObjectRaw(string json, string key)
@@ -1812,7 +1841,9 @@ namespace XppAiCopilotCompanion.MetaModel
 
             string dynamicFields = ExtractJsonString(objJson, "dynamicFields");
             if (dynamicFields != null)
-                dto.DynamicFields = "true".Equals(dynamicFields, StringComparison.OrdinalIgnoreCase);
+                dto.DynamicFields = "true".Equals(dynamicFields, StringComparison.OrdinalIgnoreCase)
+                    || "yes".Equals(dynamicFields, StringComparison.OrdinalIgnoreCase);
+            dto.Fields = ExtractJsonStringArray(objJson, "fields")?.ToList();
 
             string relations = ExtractJsonString(objJson, "relations");
             if (relations != null)

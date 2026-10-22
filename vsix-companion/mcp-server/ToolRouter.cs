@@ -38,7 +38,7 @@ namespace XppAiCopilotCompanion.McpServer
           ""objectType"": {
             ""type"": ""string"",
             ""description"": ""The D365FO object type to create."",
-            ""enum"": [""AxClass"", ""AxTable"", ""AxView"", ""AxDataEntityView"", ""AxEdt"", ""AxEnum"", ""AxForm"", ""AxTile"", ""AxMenu"", ""AxMenuItemDisplay"", ""AxMenuItemOutput"", ""AxMenuItemAction"", ""AxQuery"", ""AxSecurityPrivilege"", ""AxSecurityDuty"", ""AxSecurityRole"", ""AxService"", ""AxServiceGroup"", ""AxConfigurationKey"", ""AxTableExtension"", ""AxEnumExtension"", ""AxEdtExtension"", ""AxFormExtension"", ""AxDataEntityViewExtension"", ""AxSecurityDutyExtension"", ""AxSecurityRoleExtension"", ""AxLabelFile"", ""AxMenuExtension""]
+            ""enum"": [""AxClass"", ""AxTable"", ""AxView"", ""AxDataEntityView"", ""AxEdt"", ""AxEnum"", ""AxForm"", ""AxTile"", ""AxMenu"", ""AxMenuItemDisplay"", ""AxMenuItemOutput"", ""AxMenuItemAction"", ""AxQuery"", ""AxSecurityPrivilege"", ""AxSecurityDuty"", ""AxSecurityRole"", ""AxService"", ""AxServiceGroup"", ""AxConfigurationKey"", ""AxTableExtension"", ""AxEnumExtension"", ""AxEdtExtension"", ""AxFormExtension"", ""AxDataEntityViewExtension"", ""AxSecurityDutyExtension"", ""AxSecurityRoleExtension"", ""AxLabelFile"", ""AxMenuExtension"", ""AxCompositeDataEntityView""]
           },
           ""objectName"": { ""type"": ""string"", ""description"": ""Name of the object. Must follow the model's naming prefix convention."" },
           ""typedMetadata"": { ""type"": ""object"", ""description"": ""Full strongly-typed metadata graph for the target object type. Preferred for complete metadata writes across all object types."" },
@@ -50,15 +50,16 @@ namespace XppAiCopilotCompanion.McpServer
           ""indexes"": { ""type"": ""array"", ""items"": { ""type"": ""object"", ""properties"": { ""name"": { ""type"": ""string"" }, ""allowDuplicates"": { ""type"": ""boolean"" }, ""fields"": { ""type"": ""array"", ""items"": { ""type"": ""string"" } } }, ""required"": [""name"", ""fields""] }, ""description"": ""Table indexes for AxTable. Each index has a name and array of field names."" },
           ""fieldGroups"": { ""type"": ""array"", ""items"": { ""type"": ""object"", ""properties"": { ""name"": { ""type"": ""string"" }, ""label"": { ""type"": ""string"" }, ""fields"": { ""type"": ""array"", ""items"": { ""type"": ""string"" } } }, ""required"": [""name"", ""fields""] }, ""description"": ""Table field groups for AxTable. Each group has a name and array of field names."" },
           ""relations"": { ""type"": ""array"", ""items"": { ""type"": ""object"", ""properties"": { ""name"": { ""type"": ""string"" }, ""relatedTable"": { ""type"": ""string"" }, ""constraints"": { ""type"": ""array"", ""items"": { ""type"": ""object"", ""properties"": { ""field"": { ""type"": ""string"" }, ""relatedField"": { ""type"": ""string"" } } } } }, ""required"": [""name"", ""relatedTable""] }, ""description"": ""Table relations for AxTable. Each relation maps fields to related table fields."" },
-          ""dataSources"": { ""type"": ""array"", ""items"": { ""type"": ""object"", ""properties"": { ""name"": { ""type"": ""string"" }, ""table"": { ""type"": ""string"" }, ""parentDataSource"": { ""type"": ""string"" }, ""joinMode"": { ""type"": ""string"" }, ""linkType"": { ""type"": ""string"" }, ""dynamicFields"": { ""type"": ""boolean"" }, ""relations"": { ""type"": ""boolean"" }, ""firstOnly"": { ""type"": ""boolean"" }, ""ranges"": { ""type"": ""array"", ""items"": { ""type"": ""object"", ""properties"": { ""name"": { ""type"": ""string"" }, ""field"": { ""type"": ""string"" }, ""value"": { ""type"": ""string"" } } } } }, ""required"": [""name""] }, ""description"": ""Query data sources for AxQuery. Use this to define table sources and optional ranges. For AxFormExtension: data sources to add to the form (name, table, parentDataSource = join source on the form, linkType e.g. InnerJoin/OuterJoin/ExistJoin/Delayed/Active)."" },
+          ""dataSources"": { ""type"": ""array"", ""items"": { ""type"": ""object"", ""properties"": { ""name"": { ""type"": ""string"" }, ""table"": { ""type"": ""string"" }, ""parentDataSource"": { ""type"": ""string"" }, ""joinMode"": { ""type"": ""string"" }, ""linkType"": { ""type"": ""string"" }, ""dynamicFields"": { ""type"": ""boolean"", ""description"": ""AxQuery: default true when no fields are given; false requires fields."" }, ""fields"": { ""type"": ""array"", ""items"": { ""type"": ""string"" }, ""description"": ""AxQuery: field names of the table to select (with dynamicFields false)."" }, ""relations"": { ""type"": ""boolean"" }, ""firstOnly"": { ""type"": ""boolean"" }, ""ranges"": { ""type"": ""array"", ""items"": { ""type"": ""object"", ""properties"": { ""name"": { ""type"": ""string"" }, ""field"": { ""type"": ""string"" }, ""value"": { ""type"": ""string"" } } } } }, ""required"": [""name""] }, ""description"": ""Query data sources for AxQuery. Use this to define table sources and optional ranges. For AxFormExtension: data sources to add to the form (name, table, parentDataSource = join source on the form, linkType e.g. InnerJoin/OuterJoin/ExistJoin/Delayed/Active)."" },
           ""controls"": { ""type"": ""array"", ""items"": { ""type"": ""object"", ""properties"": { ""name"": { ""type"": ""string"", ""description"": ""Unique control name on the whole form."" }, ""controlType"": { ""type"": ""string"", ""description"": ""String, Integer, Int64, Real, Date, DateTime, Time, Guid, CheckBox, ComboBox, RadioButton, StaticText, ReferenceGroup, Group, Tab, TabPage, Grid, ButtonGroup, Button, CommandButton, MenuFunctionButton, MenuButton, ActionPaneTab. Optional when dataField is set (inferred from the field type)."" }, ""parent"": { ""type"": ""string"", ""description"": ""TOP-LEVEL controls only: name of the existing container (Group, TabPage, Grid, ButtonGroup, ...) taken from xpp_get_form_layout. Use 'Design' for the form's top level."" }, ""position"": { ""type"": ""string"", ""enum"": [""end"", ""begin"", ""after""], ""description"": ""TOP-LEVEL controls only. end (default) = last child of parent; begin = first child; after = directly after previousSibling."" }, ""previousSibling"": { ""type"": ""string"", ""description"": ""Required with position 'after': an existing control that is a DIRECT child of parent."" }, ""dataSource"": { ""type"": ""string"", ""description"": ""Form data source name (inherited from the parent container when omitted)."" }, ""dataField"": { ""type"": ""string"", ""description"": ""Field on the data source's table (table extension fields included)."" }, ""dataGroup"": { ""type"": ""string"", ""description"": ""Table field group (for Group controls bound to a field group)."" }, ""label"": { ""type"": ""string"" }, ""properties"": { ""type"": ""object"", ""description"": ""Extra control properties, e.g. {\""Visible\"":\""No\"", \""MenuItemName\"":\""MyMenuItem\""}."" }, ""controls"": { ""type"": ""array"", ""items"": { ""type"": ""object"" }, ""description"": ""Child controls of a container, same shape but WITHOUT parent/position/previousSibling; placed in list order."" } }, ""required"": [""name""] }, ""description"": ""AxFormExtension only: controls to add. Survey the form with xpp_get_form_layout first and choose parent/position from it."" },
-          ""controlModifications"": { ""type"": ""array"", ""items"": { ""type"": ""object"", ""properties"": { ""name"": { ""type"": ""string"", ""description"": ""Existing control on the form."" }, ""properties"": { ""type"": ""object"", ""description"": ""Property changes, e.g. {\""Visible\"":\""No\""}."" } }, ""required"": [""name"", ""properties""] }, ""description"": ""AxFormExtension only: property changes on existing controls of the base form."" },
+          ""controlModifications"": { ""type"": ""array"", ""items"": { ""type"": ""object"", ""properties"": { ""name"": { ""type"": ""string"", ""description"": ""Existing control of the base form (or of another extension)."" }, ""properties"": { ""type"": ""object"", ""description"": ""Property changes, e.g. {\""Visible\"":\""No\""}."" } }, ""required"": [""name"", ""properties""] }, ""description"": ""AxFormExtension only: property changes on controls of the base form or of other extensions. Allowed properties (D365FO rule): Text, Label, HelpText, Caption, Visible, Enabled, EnableFormRef, CountryRegionCodes, Pattern, PatternVersion, NeedsRecord, SaveRecord, AllowEdit, NeededPermission, Style, DataGroup; anything else fails the build with UnsupportedPropertyForModification and is rejected. Never use it for controls this extension adds: set their properties directly (controls[].properties, or updateControls later)."" },
           ""entryPoints"": { ""type"": ""array"", ""items"": { ""type"": ""object"", ""properties"": { ""name"": { ""type"": ""string"" }, ""objectType"": { ""type"": ""string"" }, ""objectName"": { ""type"": ""string"" }, ""grant"": { ""type"": ""string"" } }, ""required"": [""name""] }, ""description"": ""Security entry points for AxSecurityPrivilege/Duty/Role."" },
           ""privileges"": { ""type"": ""array"", ""items"": { ""type"": ""string"" }, ""description"": ""AxSecurityDuty, AxSecurityRole and their extensions: privilege names to add."" },
           ""duties"": { ""type"": ""array"", ""items"": { ""type"": ""string"" }, ""description"": ""AxSecurityRole / AxSecurityRoleExtension: duty names to add."" },
           ""dataEntityPermissions"": { ""type"": ""array"", ""items"": { ""type"": ""object"", ""properties"": { ""name"": { ""type"": ""string"", ""description"": ""Data entity name."" }, ""grant"": { ""type"": ""string"", ""description"": ""Read, Update, Create, Correct, Delete or All; comma-separated for several."" }, ""integrationMode"": { ""type"": ""string"", ""enum"": [""All"", ""DataServices"", ""DataManagement""] } }, ""required"": [""name""] }, ""description"": ""AxSecurityPrivilege only: data entity permissions."" },
-          ""entityFields"": { ""type"": ""array"", ""items"": { ""type"": ""object"", ""properties"": { ""name"": { ""type"": ""string"", ""description"": ""New entity field name (unique on the entity and its extensions)."" }, ""dataSource"": { ""type"": ""string"", ""description"": ""Entity data source name (read the entity first)."" }, ""dataField"": { ""type"": ""string"", ""description"": ""Field on the data source's table or one of its table extensions."" }, ""label"": { ""type"": ""string"" }, ""mandatory"": { ""type"": ""boolean"" } }, ""required"": [""name"", ""dataSource"", ""dataField""] }, ""description"": ""AxDataEntityViewExtension only: mapped fields to add. The staging table gets the same fields automatically."" },
+          ""entityFields"": { ""type"": ""array"", ""items"": { ""type"": ""object"", ""properties"": { ""name"": { ""type"": ""string"", ""description"": ""New entity field name (unique on the entity and its extensions)."" }, ""dataSource"": { ""type"": ""string"", ""description"": ""Entity data source name (read the entity first)."" }, ""dataField"": { ""type"": ""string"", ""description"": ""Field on the data source: a table field (incl. table extensions), or, when the data source is another entity or a view, a field of that entity/view or of its extensions."" }, ""label"": { ""type"": ""string"" }, ""mandatory"": { ""type"": ""boolean"" } }, ""required"": [""name"", ""dataSource"", ""dataField""] }, ""description"": ""AxDataEntityViewExtension only: mapped fields to add. The staging table gets the same fields automatically."" },
           ""skipStagingTable"": { ""type"": ""boolean"", ""description"": ""AxDataEntityViewExtension only: do not extend the staging table. Default false."" },
+          ""rootDataEntities"": { ""type"": ""array"", ""items"": { ""type"": ""object"" }, ""description"": ""AxCompositeDataEntityView only: one root reference {name, dataEntity, embeddedDataEntities: [{name, dataEntity, relation, embeddedDataEntities}]}. relation is a relation on the embedded entity that points to its parent entity. Entities, relations and the staging tables (RowId/ParentRowId, relation to the parent staging table) are checked."" },
           ""modelName"": { ""type"": ""string"", ""description"": ""Target model name. If omitted, uses the active project's model."" },
           ""menuElements"": { ""type"": ""array"", ""items"": { ""type"": ""object"", ""properties"": { ""name"": { ""type"": ""string"" }, ""menuItemName"": { ""type"": ""string"", ""description"": ""Defaults to name."" }, ""menuItemType"": { ""type"": ""string"", ""enum"": [""Display"", ""Output"", ""Action""] }, ""parent"": { ""type"": ""string"", ""description"": ""Existing submenu of the base menu (e.g. 'Periodic'); omit for the menu's top level."" }, ""position"": { ""type"": ""string"", ""enum"": [""end"", ""begin"", ""after""] }, ""previousSibling"": { ""type"": ""string"" } }, ""required"": [""name"", ""menuItemType""] }, ""description"": ""AxMenuExtension only: menu items to add. The menu item and the parent submenu must exist."" }
         },
@@ -67,13 +68,14 @@ namespace XppAiCopilotCompanion.McpServer
     },
     {
       ""name"": ""xpp_read_object"",
-      ""description"": ""Reads a D365FO X++ object by type and name using the MetaModel API. CRITICAL: This is the ONLY correct way to read X++ objects. NEVER read metadata files directly via Get-Content, the terminal, or file tools — this tool returns everything the XML contains: declaration, every method's signature (with access modifiers such as internal/private/public) and full source, and strongly-typed metadata (typedMetadata graph plus properties, enumValues, fields, indexes, fieldGroups, relations, dataSources), model name and editability. Works for ANY metadata type. For classes with very large source, methods are listed by signature first; call again with methodNames to get their full source."",
+      ""description"": ""Reads a D365FO X++ object by type and name using the MetaModel API. CRITICAL: This is the ONLY correct way to read X++ objects. NEVER read metadata files directly via Get-Content, the terminal, or file tools — this tool returns everything the XML contains: declaration, every method's signature (with access modifiers such as internal/private/public) and full source, and strongly-typed metadata (typedMetadata graph plus properties, enumValues, fields, indexes, fieldGroups, relations, dataSources), model name and editability. Works for ANY metadata type. For classes with very large source, methods are listed by signature first; call again with methodNames to get their full source. Large objects (entities, forms, big tables) return a summary first; ask for what you need with sections."",
       ""inputSchema"": {
         ""type"": ""object"",
         ""properties"": {
           ""objectType"": { ""type"": ""string"", ""description"": ""Any D365FO metadata type: AxClass, AxTable, AxForm, AxEnum, AxEdt, AxView, AxQuery, AxMap, AxReport, AxDataEntityView, AxTableExtension, AxFormExtension, etc."" },
           ""objectName"": { ""type"": ""string"", ""description"": ""The object name."" },
           ""methodNames"": { ""type"": ""array"", ""items"": { ""type"": ""string"" }, ""description"": ""Optional. Return the full source of only these methods (use after a read that listed signatures only)."" },
+          ""sections"": { ""type"": ""array"", ""items"": { ""type"": ""string"" }, ""description"": ""Optional. Return only these sections, e.g. [\""properties\"", \""dataSources\"", \""entityFields\"", \""fields\"", \""relations\"", \""indexes\"", \""fieldGroups\"", \""methods\"", \""declaration\"", \""controls\"", \""typedMetadata\""]; [\""summary\""] lists the sections with their sizes; [\""all\""] returns everything. Without it, objects over 25,000 characters return their small sections plus a list of the large ones."" },
           ""filePath"": { ""type"": ""string"", ""description"": ""Absolute path to the metadata file, if you have it. Prefer objectType + objectName."" }
         },
         ""required"": []
@@ -85,7 +87,7 @@ namespace XppAiCopilotCompanion.McpServer
       ""inputSchema"": {
         ""type"": ""object"",
         ""properties"": {
-          ""objectType"": { ""type"": ""string"", ""description"": ""The object type (AxClass, AxTable, AxForm, AxEdt, AxEnum, AxView, AxQuery, AxDataEntityView, AxMenu, AxSecurityPrivilege, AxSecurityDuty, AxSecurityRole, AxTableExtension, AxEnumExtension, AxEdtExtension, AxFormExtension, AxDataEntityViewExtension, AxSecurityDutyExtension, AxSecurityRoleExtension, AxMenuExtension). For extensions, 'properties' are written as property modifications of the base object."" },
+          ""objectType"": { ""type"": ""string"", ""description"": ""The object type (AxClass, AxTable, AxForm, AxEdt, AxEnum, AxView, AxQuery, AxDataEntityView, AxMenu, AxSecurityPrivilege, AxSecurityDuty, AxSecurityRole, AxTableExtension, AxEnumExtension, AxEdtExtension, AxFormExtension, AxDataEntityViewExtension, AxSecurityDutyExtension, AxSecurityRoleExtension, AxMenuExtension, AxCompositeDataEntityView). For extensions, 'properties' are written as property modifications of the base object."" },
           ""objectName"": { ""type"": ""string"", ""description"": ""The object name to update."" },
           ""typedMetadata"": { ""type"": ""object"", ""description"": ""Full strongly-typed metadata graph for complete metadata updates across all object types."" },
           ""declaration"": { ""type"": ""string"", ""description"": ""New raw X++ declaration code. Replaces existing. Plain code only — NO XML, NO CDATA."" },
@@ -97,9 +99,12 @@ namespace XppAiCopilotCompanion.McpServer
           ""indexes"": { ""type"": ""array"", ""items"": { ""type"": ""object"", ""properties"": { ""name"": { ""type"": ""string"" }, ""allowDuplicates"": { ""type"": ""boolean"" }, ""fields"": { ""type"": ""array"", ""items"": { ""type"": ""string"" } } }, ""required"": [""name"", ""fields""] }, ""description"": ""Indexes to add (for AxTable)."" },
           ""fieldGroups"": { ""type"": ""array"", ""items"": { ""type"": ""object"", ""properties"": { ""name"": { ""type"": ""string"" }, ""label"": { ""type"": ""string"" }, ""fields"": { ""type"": ""array"", ""items"": { ""type"": ""string"" } } }, ""required"": [""name"", ""fields""] }, ""description"": ""Field groups to add (for AxTable)."" },
           ""relations"": { ""type"": ""array"", ""items"": { ""type"": ""object"", ""properties"": { ""name"": { ""type"": ""string"" }, ""relatedTable"": { ""type"": ""string"" }, ""constraints"": { ""type"": ""array"", ""items"": { ""type"": ""object"", ""properties"": { ""field"": { ""type"": ""string"" }, ""relatedField"": { ""type"": ""string"" } } } } }, ""required"": [""name"", ""relatedTable""] }, ""description"": ""Relations to add (for AxTable)."" },
-          ""dataSources"": { ""type"": ""array"", ""items"": { ""type"": ""object"", ""properties"": { ""name"": { ""type"": ""string"" }, ""table"": { ""type"": ""string"" }, ""parentDataSource"": { ""type"": ""string"" }, ""joinMode"": { ""type"": ""string"" }, ""linkType"": { ""type"": ""string"" }, ""dynamicFields"": { ""type"": ""boolean"" }, ""relations"": { ""type"": ""boolean"" }, ""firstOnly"": { ""type"": ""boolean"" }, ""ranges"": { ""type"": ""array"", ""items"": { ""type"": ""object"", ""properties"": { ""name"": { ""type"": ""string"" }, ""field"": { ""type"": ""string"" }, ""value"": { ""type"": ""string"" } } } } }, ""required"": [""name""] }, ""description"": ""Query data sources for AxQuery updates. For AxFormExtension: data sources to add to the form (name, table, parentDataSource, linkType)."" },
+          ""dataSources"": { ""type"": ""array"", ""items"": { ""type"": ""object"", ""properties"": { ""name"": { ""type"": ""string"" }, ""table"": { ""type"": ""string"" }, ""parentDataSource"": { ""type"": ""string"" }, ""joinMode"": { ""type"": ""string"" }, ""linkType"": { ""type"": ""string"" }, ""dynamicFields"": { ""type"": ""boolean"", ""description"": ""AxQuery: default true when no fields are given; false requires fields."" }, ""fields"": { ""type"": ""array"", ""items"": { ""type"": ""string"" }, ""description"": ""AxQuery: field names of the table to select (with dynamicFields false)."" }, ""relations"": { ""type"": ""boolean"" }, ""firstOnly"": { ""type"": ""boolean"" }, ""ranges"": { ""type"": ""array"", ""items"": { ""type"": ""object"", ""properties"": { ""name"": { ""type"": ""string"" }, ""field"": { ""type"": ""string"" }, ""value"": { ""type"": ""string"" } } } } }, ""required"": [""name""] }, ""description"": ""Query data sources for AxQuery updates. For AxFormExtension: data sources to add to the form (name, table, parentDataSource, linkType)."" },
           ""controls"": { ""type"": ""array"", ""items"": { ""type"": ""object"" }, ""description"": ""AxFormExtension only: controls to add — same shape as in xpp_create_object (name, controlType, parent, position end|begin|after, previousSibling, dataSource, dataField, dataGroup, label, properties, controls). Call xpp_get_form_layout first."" },
-          ""controlModifications"": { ""type"": ""array"", ""items"": { ""type"": ""object"", ""properties"": { ""name"": { ""type"": ""string"" }, ""properties"": { ""type"": ""object"" } }, ""required"": [""name"", ""properties""] }, ""description"": ""AxFormExtension only: property changes on existing controls of the base form."" },
+          ""controlModifications"": { ""type"": ""array"", ""items"": { ""type"": ""object"", ""properties"": { ""name"": { ""type"": ""string"" }, ""properties"": { ""type"": ""object"" } }, ""required"": [""name"", ""properties""] }, ""description"": ""AxFormExtension only: property changes on controls of the base form or of other extensions. Allowed properties (D365FO rule): Text, Label, HelpText, Caption, Visible, Enabled, EnableFormRef, CountryRegionCodes, Pattern, PatternVersion, NeedsRecord, SaveRecord, AllowEdit, NeededPermission, Style, DataGroup; anything else fails the build with UnsupportedPropertyForModification and is rejected. Never use it for controls this extension adds: set their properties directly (controls[].properties, or updateControls later)."" },
+          ""updateControls"": { ""type"": ""array"", ""items"": { ""type"": ""object"", ""properties"": { ""name"": { ""type"": ""string"", ""description"": ""A control this extension added (also nested ones)."" }, ""properties"": { ""type"": ""object"", ""description"": ""Any property of the control, e.g. {\""ColumnsMode\"":\""Fill\""}."" }, ""label"": { ""type"": ""string"" }, ""dataSource"": { ""type"": ""string"" }, ""dataField"": { ""type"": ""string"" }, ""dataGroup"": { ""type"": ""string"" }, ""parent"": { ""type"": ""string"", ""description"": ""Move: new parent (\""Design\"" for the top level)."" }, ""position"": { ""type"": ""string"", ""enum"": [""end"", ""begin"", ""after""] }, ""previousSibling"": { ""type"": ""string"" } }, ""required"": [""name""] }, ""description"": ""AxFormExtension only: change controls this extension added: properties, label, binding, and placement (give parent/position/previousSibling to move). Validated before saving; moves are verified after."" },
+          ""removeControls"": { ""type"": ""array"", ""items"": { ""type"": ""string"" }, ""description"": ""AxFormExtension only: names of controls this extension added to remove (with their children). Base-form controls cannot be removed; hide them with controlModifications Visible=No."" },
+          ""removeControlModifications"": { ""type"": ""array"", ""items"": { ""type"": ""string"" }, ""description"": ""AxFormExtension only: drop control modifications of this extension, as \""Control\"" (all its property changes) or \""Control.Property\""."" },
           ""entryPoints"": { ""type"": ""array"", ""items"": { ""type"": ""object"", ""properties"": { ""name"": { ""type"": ""string"" }, ""objectType"": { ""type"": ""string"" }, ""objectName"": { ""type"": ""string"" }, ""grant"": { ""type"": ""string"" } }, ""required"": [""name""] }, ""description"": ""Entry points to add or update by name (for AxSecurityPrivilege). grant: Read, Update, Create, Correct, Delete, Invoke or All; comma-separated for several."" },
           ""privileges"": { ""type"": ""array"", ""items"": { ""type"": ""string"" }, ""description"": ""AxSecurityDuty, AxSecurityRole and their extensions: privilege names to add."" },
           ""duties"": { ""type"": ""array"", ""items"": { ""type"": ""string"" }, ""description"": ""AxSecurityRole / AxSecurityRoleExtension: duty names to add."" },
@@ -107,14 +112,15 @@ namespace XppAiCopilotCompanion.McpServer
           ""removeSecurityItems"": { ""type"": ""array"", ""items"": { ""type"": ""string"" }, ""description"": ""Security objects: names of entry points, data entity permissions, privileges or duties to remove."" },
           ""entityFields"": { ""type"": ""array"", ""items"": { ""type"": ""object"", ""properties"": { ""name"": { ""type"": ""string"" }, ""dataSource"": { ""type"": ""string"" }, ""dataField"": { ""type"": ""string"" }, ""label"": { ""type"": ""string"" }, ""mandatory"": { ""type"": ""boolean"" } }, ""required"": [""name"", ""dataSource"", ""dataField""] }, ""description"": ""AxDataEntityViewExtension only: mapped fields to add; the staging table extension gets the same fields."" },
           ""menuElements"": { ""type"": ""array"", ""items"": { ""type"": ""object"" }, ""description"": ""AxMenuExtension only: menu items to add or replace by name (same shape as in xpp_create_object)."" },
-          ""skipStagingTable"": { ""type"": ""boolean"", ""description"": ""AxDataEntityViewExtension only: do not extend the staging table."" }
+          ""skipStagingTable"": { ""type"": ""boolean"", ""description"": ""AxDataEntityViewExtension only: do not extend the staging table."" },
+          ""rootDataEntities"": { ""type"": ""array"", ""items"": { ""type"": ""object"" }, ""description"": ""AxCompositeDataEntityView only: the full reference tree (replaces the current one), same shape as in xpp_create_object."" }
         },
         ""required"": [""objectType"", ""objectName""]
       }
     },
     {
       ""name"": ""xpp_find_object"",
-      ""description"": ""Searches for D365FO metadata objects by name across ALL loaded models and packages using the MetaModel API. CRITICAL: Always use this instead of Get-ChildItem/dir/file searches on metadata folders. NEVER search the file system for X++ objects. Returns matching objects with type, model, and editability. Searches run on the Visual Studio UI thread: search for ONE specific object at a time, always pass objectType, and use exactMatch=true when you know the full name. Partial names must be at least 3 characters. Scans stop after a few seconds and return PARTIAL results with a message — if that happens, narrow the search instead of retrying the same query."",
+      ""description"": ""Security roles, duties and privileges (objectType AxSecurityRole/AxSecurityDuty/AxSecurityPrivilege, partial match) are also found by their label text, e.g. 'Sales manager' or 'Maintain fixed assets'; each match shows its label, and when no label has all the words the closest labels are listed. Searches for D365FO metadata objects by name across ALL loaded models and packages using the MetaModel API. CRITICAL: Always use this instead of Get-ChildItem/dir/file searches on metadata folders. NEVER search the file system for X++ objects. Returns matching objects with type, model, and editability. Searches run on the Visual Studio UI thread: search for ONE specific object at a time, always pass objectType, and use exactMatch=true when you know the full name. Partial names must be at least 3 characters. Scans stop after a few seconds and return PARTIAL results with a message — if that happens, narrow the search instead of retrying the same query."",
       ""inputSchema"": {
         ""type"": ""object"",
         ""properties"": {
@@ -207,18 +213,19 @@ namespace XppAiCopilotCompanion.McpServer
     },
     {
       ""name"": ""xpp_create_label"",
-      ""description"": ""Creates a label in a label file of your own model, in the given language and optionally in more languages in the same call (translations). The label file must exist: create it with xpp_create_object objectType=AxLabelFile (objectName = label file ID, properties.Languages = 'en-US,fr-CA'). The response gives the reference to use in properties: @<labelFileId>:<labelId>."",
+      ""description"": ""Creates labels in a label file of your own model: one label (labelId + text) or many at once (labels array; prefer this over repeated calls), each in the given language and optionally in more languages (translations). Each label file is written once per call; the result lists every label and language as created, unchanged (same text already there) or FAILED. The label file must exist: create it with xpp_create_object objectType=AxLabelFile (objectName = label file ID, properties.Languages = 'en-US,fr-CA'). The response gives the reference to use in properties: @<labelFileId>:<labelId>."",
       ""inputSchema"": {
         ""type"": ""object"",
         ""properties"": {
           ""labelFileId"": { ""type"": ""string"", ""description"": ""The label file ID."" },
           ""language"": { ""type"": ""string"", ""description"": ""Language code of 'text'. Default en-US."" },
-          ""labelId"": { ""type"": ""string"", ""description"": ""The label ID to create (letters and digits, e.g. HSRemovalStatus)."" },
+          ""labelId"": { ""type"": ""string"", ""description"": ""The label ID to create (letters and digits, e.g. HSRemovalStatus). Omit when using labels."" },
           ""text"": { ""type"": ""string"", ""description"": ""The label text."" },
           ""translations"": { ""type"": ""object"", ""description"": ""Optional texts in other languages of the same label file, keyed by language code, e.g. fr-CA."" },
-          ""comment"": { ""type"": ""string"", ""description"": ""Optional comment."" }
+          ""comment"": { ""type"": ""string"", ""description"": ""Optional comment."" },
+          ""labels"": { ""type"": ""array"", ""items"": { ""type"": ""object"", ""properties"": { ""labelId"": { ""type"": ""string"" }, ""text"": { ""type"": ""string"", ""description"": ""Text in 'language'."" }, ""comment"": { ""type"": ""string"" }, ""translations"": { ""type"": ""object"", ""description"": ""Texts in other languages, keyed by language code."" } }, ""required"": [""labelId"", ""text""] }, ""description"": ""Several labels in one call (instead of labelId/text)."" }
         },
-        ""required"": [""labelFileId"", ""labelId"", ""text""]
+        ""required"": [""labelFileId""]
       }
     },
     {
@@ -402,7 +409,7 @@ namespace XppAiCopilotCompanion.McpServer
             }
         }
 
-        private string DelegateToBridge(string idToken, string json, string action)
+        private string DelegateToBridge(string idToken, string json, string action, Func<string, string> postText = null)
         {
             string argsJson = JsonHelpers.ExtractToolArgumentsObject(json);
 
@@ -438,6 +445,13 @@ namespace XppAiCopilotCompanion.McpServer
             {
                 bool valid = ReadBool(validation, "valid");
                 sb.AppendLine("Validation: " + (valid ? "PASSED" : "FAILED") + " - " + JsonHelpers.ExtractJsonString(validation, "message"));
+                if (!valid)
+                {
+                    // The object is saved but does not match the request: report it as an error so it is not missed.
+                    isError = true;
+                    sb.AppendLine("The object was saved, but it does not contain everything requested (see the mismatches above). "
+                        + "Fix it with xpp_update_object, or delete it with xpp_delete_object.");
+                }
             }
 
             if (isSuccess && (action == "list_objects" || action == "find_object")
@@ -454,7 +468,7 @@ namespace XppAiCopilotCompanion.McpServer
                 sb.AppendLine(layout);
 
             // Append matches/objects/items/labels if present
-            AppendArrayField(sb, bridgeResponse, "matches", "objectType", "objectName", "modelName", "isCustom");
+            AppendArrayField(sb, bridgeResponse, "matches", "objectType", "objectName", "modelName", "isCustom", "label");
             AppendArrayField(sb, bridgeResponse, "objects", "objectType", "objectName", "modelName", "isCustom");
             AppendArrayField(sb, bridgeResponse, "models", "name", "displayName", "isCustom");
             AppendArrayField(sb, bridgeResponse, "labels", "id", "text");
@@ -508,6 +522,7 @@ namespace XppAiCopilotCompanion.McpServer
 
             string text = sb.ToString().Trim();
             if (string.IsNullOrEmpty(text)) text = isError ? "Operation failed." : "Operation completed.";
+            if (postText != null && !isError) text = postText(text);
 
             return JsonHelpers.BuildToolResult(idToken, text, isError);
         }
@@ -672,8 +687,14 @@ namespace XppAiCopilotCompanion.McpServer
             }
 
             string response = _bridge.Call("delete_object", argsJson);
+            bool deleted = ReadBool(response, "success");
+            if (deleted)
+            {
+                string xrefNote = _xref.RemoveObject(objectType, objectName);
+                if (xrefNote != null) note += "\n" + xrefNote;
+            }
             return JsonHelpers.BuildToolResult(idToken, (JsonHelpers.ExtractJsonString(response, "message") ?? "Delete failed.") + note,
-                isError: !ReadBool(response, "success"));
+                isError: !deleted);
         }
 
         private string HandleReadObject(string idToken, string json)
@@ -689,10 +710,102 @@ namespace XppAiCopilotCompanion.McpServer
 
             // Otherwise use typed API
             if (!string.IsNullOrEmpty(objectType) && !string.IsNullOrEmpty(objectName))
-                return DelegateToBridge(idToken, json, "read_object");
+            {
+                var sections = JsonHelpers.ExtractJsonStringArray(argsJson, "sections")
+                    ?? JsonHelpers.ExtractArgString(argsJson, "sections")?.Split(new[] { ',' }, StringSplitOptions.RemoveEmptyEntries);
+                bool methodsAsked = (JsonHelpers.ExtractJsonStringArray(argsJson, "methodNames")?.Length ?? 0) > 0;
+                return DelegateToBridge(idToken, json, "read_object", text => SelectReadSections(text, sections, methodsAsked));
+            }
 
             return JsonHelpers.BuildToolResult(idToken,
                 "Either (objectType + objectName) or filePath is required.", isError: true);
+        }
+
+        // Reads above this size return the small sections and an index of the large ones (#45).
+        private const int ReadSummaryThreshold = 25000;
+        private const int SummaryInlineSectionChars = 3000;
+
+        private sealed class ReadSection
+        {
+            public string Title;
+            public string Key;
+            public string Body;
+        }
+
+        /// <summary>
+        /// Filters a formatted read result to the requested sections ("=== Title ===" blocks). Without sections, a result
+        /// larger than ReadSummaryThreshold keeps its small sections and lists the large ones with their size.
+        /// </summary>
+        private static string SelectReadSections(string text, string[] wanted, bool methodsAsked)
+        {
+            var lines = text.Replace("\r\n", "\n").Split('\n');
+            var header = new StringBuilder();
+            var sections = new System.Collections.Generic.List<ReadSection>();
+            foreach (string line in lines)
+            {
+                if (line.StartsWith("=== ") && line.EndsWith(" ==="))
+                {
+                    string title = line.Substring(4, line.Length - 8);
+                    string key = new string(title.Split('(')[0].Where(char.IsLetter).ToArray()).ToLowerInvariant();
+                    if (key == "metadatatypedmetadata") key = "typedmetadata";
+                    if (key.StartsWith("entityfields")) key = "entityfields";
+                    sections.Add(new ReadSection { Title = title, Key = key, Body = "" });
+                }
+                else if (sections.Count == 0) header.AppendLine(line);
+                else sections[sections.Count - 1].Body += line + "\n";
+            }
+
+            var requested = (wanted ?? new string[0]).Select(w => new string(w.Where(char.IsLetter).ToArray()).ToLowerInvariant())
+                .Where(w => w.Length > 0).ToList();
+            if (requested.Contains("all") || sections.Count == 0 || (requested.Count == 0 && (text.Length <= ReadSummaryThreshold || methodsAsked)))
+                return text;
+
+            string Describe(ReadSection sec)
+            {
+                string body = sec.Body.Trim();
+                int items = body.StartsWith("[") ? CountTopLevelObjects(body) : -1;
+                return sec.Key + " (" + sec.Title + "): " + body.Length + " chars" + (items >= 0 ? ", " + items + " item(s)" : "");
+            }
+
+            var sb = new StringBuilder(header.ToString().TrimEnd()).AppendLine();
+            if (requested.Count == 0 || requested.Contains("summary"))
+            {
+                bool inlineSmall = requested.Count == 0;
+                sb.AppendLine();
+                sb.AppendLine(inlineSmall
+                    ? "Large object (" + text.Length + " chars): small sections are shown in full, large ones only listed. Call again with sections=[...] (keys below) or sections=[\"all\"]."
+                    : "Sections (call again with sections=[...]):");
+                foreach (var sec in sections.Where(x => !inlineSmall || x.Body.Trim().Length > SummaryInlineSectionChars))
+                    sb.AppendLine("  " + Describe(sec));
+                if (inlineSmall)
+                    foreach (var sec in sections.Where(x => x.Body.Trim().Length <= SummaryInlineSectionChars))
+                        sb.AppendLine().AppendLine("=== " + sec.Title + " ===").Append(sec.Body.TrimEnd()).AppendLine();
+                return sb.ToString().TrimEnd();
+            }
+
+            var unknown = requested.Where(r => !sections.Any(x => x.Key == r || x.Key.StartsWith(r))).ToList();
+            foreach (var sec in sections.Where(x => requested.Any(r => x.Key == r || x.Key.StartsWith(r))))
+                sb.AppendLine().AppendLine("=== " + sec.Title + " ===").Append(sec.Body.TrimEnd()).AppendLine();
+            if (unknown.Count > 0)
+                sb.AppendLine().AppendLine("Not in this object's output: " + string.Join(", ", unknown) + ". Available sections: "
+                    + string.Join(", ", sections.Select(x => x.Key)) + ".");
+            return sb.ToString().TrimEnd();
+        }
+
+        private static int CountTopLevelObjects(string json)
+        {
+            int depth = 0, count = 0;
+            bool inStr = false, esc = false;
+            foreach (char c in json)
+            {
+                if (esc) { esc = false; continue; }
+                if (c == '\\') { esc = true; continue; }
+                if (c == '"') { inStr = !inStr; continue; }
+                if (inStr) continue;
+                if (c == '[' || c == '{') { if (depth == 1 && c == '{') count++; depth++; }
+                else if (c == ']' || c == '}') depth--;
+            }
+            return count;
         }
 
         private string HandleFindObject(string idToken, string json)
@@ -783,10 +896,11 @@ namespace XppAiCopilotCompanion.McpServer
             string labelFileId = JsonHelpers.ExtractArgString(argsJson, "labelFileId");
             string labelId = JsonHelpers.ExtractArgString(argsJson, "labelId");
             string text = JsonHelpers.ExtractArgString(argsJson, "text");
+            bool hasList = argsJson != null && argsJson.Contains("\"labels\"");
 
-            if (string.IsNullOrEmpty(labelFileId) || string.IsNullOrEmpty(labelId) || string.IsNullOrEmpty(text))
+            if (string.IsNullOrEmpty(labelFileId) || (!hasList && (string.IsNullOrEmpty(labelId) || string.IsNullOrEmpty(text))))
                 return JsonHelpers.BuildToolResult(idToken,
-                    "Parameters 'labelFileId', 'labelId', and 'text' are required.", isError: true);
+                    "Parameter 'labelFileId' is required, plus either 'labels' (array of {labelId, text, comment?, translations?}) or 'labelId' and 'text'.", isError: true);
 
             return DelegateToBridge(idToken, json, "create_label");
         }

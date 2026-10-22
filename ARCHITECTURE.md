@@ -117,6 +117,9 @@
 | **D365FO config auto-detection** | Reads the active configuration from the registry (`CurrentMetadataConfig`) and the corresponding JSON file under `%LOCALAPPDATA%\Microsoft\Dynamics365\XPPConfig`. Zero-config for developers who already have D365FO set up. |
 | **Serial request queue (BridgeClient)** | All MCP→Bridge HTTP calls are funnelled through a `BlockingCollection` with a single worker thread. This prevents concurrent requests from racing on the VS main thread and causing deadlocks. |
 | **Cascade timeout prevention (Bridge)** | When a `DispatchAction` call times out, the dispatch gate (`SemaphoreSlim`) is **held** until the hung task eventually completes. Subsequent requests fail fast with "bridge busy" (~3 s) instead of each one blocking for the full dispatch timeout and cascading failures across all remaining types. |
+| **Nothing applied silently** | Every create/update reports anything it could not apply as an error: unknown `typedMetadata` keys and abstract collection items without `"$type"` are refused before saving, a failed post-save validation returns `isError`, and creating an existing name is refused instead of overwriting it. |
+| **Compiler rules before the build** | Form extensions use D365FO's own rules instead of copies: the modifiable control properties come from `AxFormExtensionValidator.supportedModificationTypes`, pattern-required values from the platform `PatternAnalyzer`, and after saving the compiler's `AxFormExtensionValidator`/`AxFormExtensionPatternValidator` run over every extension of the form (xppc may attribute a pattern error to any of them). Errors the change introduces restore the previous version. |
+| **Fields resolved through any data source** | Entity extension fields are resolved on tables, views and other data entities (with their extensions), down to the table field, which is also what the staging table extension gets. |
 | **Cancelled-item skip (MCP queue)** | When a caller in the MCP server times out waiting for the serial queue, it marks the work item as cancelled. The queue worker skips cancelled items instead of sending a wasted HTTP call to the bridge. |
 
 ---
@@ -196,6 +199,13 @@ vsix-companion/
 │   ├── MetaModelBridge.AgentOps.cs      # Delete/exclude, label files, menu extensions, relation checks,
 │   │                                    #   rollback of half-created objects, project auto-add
 │   ├── MetaModelBridge.Build.cs         # xpp_build: LabelC + xppc, diagnostics from the xppc XML log
+│   ├── MetaModelBridge.DataEntityExtensions.cs # Entity extension fields (tables, views, entities as data
+│   │                                    #   sources), staging table extensions, typedMetadata.Fields
+│   ├── MetaModelBridge.CompositeEntities.cs # AxCompositeDataEntityView create/update, relation and staging checks
+│   ├── MetaModelBridge.FormExtensions.cs # Form layout (all extensions merged), placement checks
+│   ├── MetaModelBridge.FormExtensionControls.cs # controlModifications rules; update/move/remove own controls
+│   ├── MetaModelBridge.FormPatterns.cs  # Pattern-required values, compiler validators after save, pattern guidance
+│   ├── MetaModelBridge.SecurityLabels.cs # Label-text search for roles, duties and privileges
 │   ├── MetaModelBridge.VsProject.cs     # Active project via DTE/VSProjectNode (items, add, remove),
 │   │                                    #   xpp_select_project over the open solution
 │   ├── MetaModelBridgeServer.cs         # HTTP server (port 21330) — JSON parsing/serialization,
@@ -207,7 +217,9 @@ vsix-companion/
 │
 ├── mcp-server/                           # ── MCP Server (standalone exe) ──
 │   ├── Program.cs                       # Entry point — SSE/HTTP MCP server on port 21329
-│   ├── ToolRouter.cs                    # 22 tool definitions with JSON Schema, routing logic
+│   ├── ToolRouter.cs                    # 22 tool definitions with JSON Schema, routing logic,
+│   │                                    #   read sections/summary, failed validation -> isError
+│   ├── XRefQuery.cs                     # Where-used from the XRef DB; removes a deleted object's entries
 │   ├── BridgeClient.cs                  # HTTP client → MetaModel Bridge (port 21330),
 │   │                                    #   serial queue (BlockingCollection), cancelled-item skip
 │   ├── DocSearchHandler.cs              # xpp_search_docs handler (Learn semantic search, markdown pages)

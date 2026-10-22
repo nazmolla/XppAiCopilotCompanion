@@ -89,6 +89,8 @@ namespace XppAiCopilotCompanion.MetaModel
         public string JoinMode { get; set; }
         public string LinkType { get; set; }
         public bool? DynamicFields { get; set; }
+        // Field names of the data source's table, used when DynamicFields is false.
+        public List<string> Fields { get; set; }
         public bool? Relations { get; set; }
         public bool? FirstOnly { get; set; }
         public List<QueryRangeDto> Ranges { get; set; } = new List<QueryRangeDto>();
@@ -221,6 +223,10 @@ namespace XppAiCopilotCompanion.MetaModel
         public List<MenuElementDto> MenuElements { get; set; }
         // Entry points, privileges, duties or data entity permissions to remove, by name.
         public List<string> RemoveSecurityItems { get; set; }
+        // AxFormExtension: change or remove controls the extension itself added; drop control modifications.
+        public List<FormControlDto> UpdateControls { get; set; }
+        public List<string> RemoveControls { get; set; }
+        public List<string> RemoveControlModifications { get; set; }
     }
 
     // ── Result DTOs ──
@@ -280,6 +286,8 @@ namespace XppAiCopilotCompanion.MetaModel
         public string PackageName { get; set; }
         public string FilePath { get; set; }
         public bool IsCustom { get; set; }
+        // Security roles, duties and privileges: label text (en-US), which requirements usually use.
+        public string Label { get; set; }
     }
 
     public sealed class ListObjectsResult
@@ -324,6 +332,15 @@ namespace XppAiCopilotCompanion.MetaModel
         public string Id { get; set; }
         public string Text { get; set; }
         public string Comment { get; set; }
+    }
+
+    // One label of an xpp_create_label call: text in the call's language plus optional translations.
+    public sealed class LabelRequestDto
+    {
+        public string LabelId { get; set; }
+        public string Text { get; set; }
+        public string Comment { get; set; }
+        public Dictionary<string, string> Translations { get; set; }
     }
 
     public sealed class ProjectItemInfo
