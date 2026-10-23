@@ -34,6 +34,7 @@
     <Compile Include="JsonHelpers.cs" />
     <Compile Include="McpLogger.cs" />
     <Compile Include="ModelObjectLister.cs" />
+    <Compile Include="SecurityAnalysis.cs" />
     <Compile Include="Program.cs" />
     <Compile Include="ToolRouter.cs" />
     <Compile Include="XRefQuery.cs" />

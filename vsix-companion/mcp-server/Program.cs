@@ -205,7 +205,7 @@ namespace XppAiCopilotCompanion.McpServer
                     // Extract id before HandleMessage so we can build an error
                     // response even if HandleMessage throws.
                     idToken = JsonHelpers.ExtractJsonValueToken(requestBody, "id");
-                    response = HandleMessage(requestBody);
+                    response = Dispatch(requestBody);
                 }
                 catch (Exception innerEx)
                 {
@@ -271,12 +271,20 @@ namespace XppAiCopilotCompanion.McpServer
                     McpLogger.Log("recv " + message.Length + " chars: "
                         + (message.Length > 200 ? message.Substring(0, 200) + "..." : message));
 
-                    string response = HandleMessage(message);
-                    if (response != null)
+                    // Read-only agent tools run in parallel (searches, references, reads); everything else in order.
+                    // Bridge calls still take turns on BridgeClient's single-worker queue.
+                    string request = message;
+                    if (IsParallelRead(request))
                     {
-                        McpLogger.Log("send " + response.Length + " chars");
-                        WriteStdioMessage(response);
+                        var task = System.Threading.Tasks.Task.Run(() => RespondStdio(request));
+                        lock (_pendingReads)
+                        {
+                            _pendingReads.RemoveAll(t => t.IsCompleted);
+                            _pendingReads.Add(task);
+                        }
                     }
+                    else
+                        RespondStdio(request);
                 }
             }
             catch (Exception ex)
@@ -285,8 +293,65 @@ namespace XppAiCopilotCompanion.McpServer
                 throw;
             }
 
+            // Let reads still running answer before the process exits.
+            System.Threading.Tasks.Task[] pending;
+            lock (_pendingReads) pending = _pendingReads.ToArray();
+            System.Threading.Tasks.Task.WaitAll(pending, 120000);
             Console.Error.WriteLine("[" + ServerName + "] MCP server exiting.");
             McpLogger.Log("MCP server exiting.");
+        }
+
+        private static readonly HashSet<string> ParallelTools = new HashSet<string>(StringComparer.Ordinal)
+        {
+            "xpp_search_code", "xpp_find_examples", "xpp_find_references", "xpp_search_docs", "xpp_read_object", "xpp_find_object",
+            "xpp_list_objects", "xpp_list_model_objects", "xpp_get_form_layout", "xpp_read_label", "xpp_get_model_info",
+            "xpp_list_models", "xpp_get_environment", "xpp_get_object_type_schema", "xpp_list_project_items", "xpp_validate_object", "xpp_analyze_security",
+        };
+
+        private static string ToolCallName(string json) =>
+            JsonHelpers.ExtractJsonString(json, "method") == "tools/call" ? JsonHelpers.ExtractNestedString(json, "params", "name") : null;
+
+        private static bool IsParallelRead(string json) => ParallelTools.Contains(ToolCallName(json) ?? "");
+
+        private static readonly object _outputLock = new object();
+        private static readonly object _writeToolLock = new object();
+        private static readonly List<System.Threading.Tasks.Task> _pendingReads = new List<System.Threading.Tasks.Task>();
+
+        /// <summary>
+        /// Handles a JSON-RPC message. Tool calls that change metadata or the project run one at a time (HTTP requests
+        /// arrive on parallel threads); read-only tools and xpp_build (minutes long, outside the bridge queue) do not wait.
+        /// </summary>
+        static string Dispatch(string json)
+        {
+            string tool = ToolCallName(json);
+            if (tool == null || ParallelTools.Contains(tool) || tool == "xpp_build")
+                return HandleMessage(json);
+            lock (_writeToolLock)
+                return HandleMessage(json);
+        }
+
+        static void RespondStdio(string message)
+        {
+            string idToken = null;
+            string response;
+            try
+            {
+                idToken = JsonHelpers.ExtractJsonValueToken(message, "id");
+                response = Dispatch(message);
+            }
+            catch (Exception ex)
+            {
+                McpLogger.Log("HandleMessage exception: " + ex);
+                response = idToken != null ? JsonHelpers.BuildError(idToken, -32603, "Internal error: " + ex.Message) : null;
+            }
+
+            // One message at a time on stdout.
+            if (response != null)
+                lock (_outputLock)
+                {
+                    McpLogger.Log("send " + response.Length + " chars");
+                    WriteStdioMessage(response);
+                }
         }
 
         static string ReadStdioMessage()

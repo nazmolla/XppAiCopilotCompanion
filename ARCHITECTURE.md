@@ -124,6 +124,8 @@
 | **Field base types are fixed** | updateFields changes EDT, label and properties within the same base type; removed fields are remembered (%LOCALAPPDATA%\XppVsCode\removed-fields.json) so a name never returns with another base type, which the database sync could not convert. |
 | **Best-practice warnings** | After every create/update the bridge checks the saved object (labels, EDTs, keys, caching, privileges for menu items, extension class naming) and appends warnings; they never block a save. |
 | **Fields resolved through any data source** | Entity extension fields are resolved on tables, views and other data entities (with their extensions), down to the table field, which is also what the staging table extension gets. |
+| **Read-only tools in parallel** | Find, list, read, search, reference, example, documentation, schema, layout and security calls run on worker tasks, so an agent's parallel reads do not queue behind each other; writes stay sequential, and bridge calls are still serialized by BridgeClient. |
+| **Security analysis from metadata files** | `xpp_analyze_security` indexes roles (with sub-roles and role extensions), duties, privileges and menu items straight from the metadata folders (no Visual Studio round trip). A role's license is the highest ViewUserLicense (Read grants) or MaintainUserLicense (other grants) of the menu items it reaches; table access is also traced through the forms that use the table. |
 | **Cancelled-item skip (MCP queue)** | When a caller in the MCP server times out waiting for the serial queue, it marks the work item as cancelled. The queue worker skips cancelled items instead of sending a wasted HTTP call to the bridge. |
 
 ---

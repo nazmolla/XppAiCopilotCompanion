@@ -47,7 +47,8 @@ Discovery and context:
 - xpp_list_model_objects
 - xpp_find_references (includeCode=true also shows the calling code lines)
 - xpp_find_examples (standard implementations for a task, e.g. "batch job with a contract", or objects similar to a given one)
-- xpp_search_code (text or regex search over the X++ code of every package)
+- xpp_search_code (text or regex search over the X++ code of every package; model takes a model or a package)
+- xpp_analyze_security (license of a role/duty/privilege, who can access an object, security gaps, segregation of duties, sign-off report)
 - xpp_get_object_type_schema
 - xpp_get_form_layout (survey a form with all extensions merged before placing form-extension controls; its "Pattern guidance" lists the children each container's pattern expects)
 
@@ -102,6 +103,13 @@ Form extensions:
 - controlModifications only for controls of the base form or other extensions, and only for properties D365FO allows (Visible, Enabled, AllowEdit, Label, Caption, HelpText, ...).
 - Change, move or remove the extension's own controls with updateControls / removeControls; drop bad modifications with removeControlModifications. Never delete and recreate the extension for this.
 - New controls get the pattern their place expects (e.g. FieldsFieldGroups for a new tab page) and the values that pattern requires, also when Pattern is set later with updateControls; an unknown PatternVersion becomes the latest; a change the build would reject is refused with the build's message, so follow the Pattern guidance from xpp_get_form_layout.
+
+Security design (clients' biggest concern; design it, do not add it at the end):
+- Every new menu item is granted by a privilege; privileges go into duties, duties into roles (extensions for standard duties and roles).
+- Least privilege: separate View (Read) and Maintain privileges; Invoke on action items; own privileges for data entities.
+- Show the license impact in the plan: xpp_analyze_security op=license on the roles you change (Read needs the menu item's ViewUserLicense, other grants its MaintainUserLicense).
+- Place duties in the standard roles that already do the job (op=access on a related standard menu item) and check segregation of duties (op=sod).
+- Before finishing: op=gaps and op=sod on the roles you touched; offer op=report for sign-off.
 
 ## Invocation Correctness
 

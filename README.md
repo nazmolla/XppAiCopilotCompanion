@@ -1,6 +1,6 @@
 # X++ AI Copilot Companion
 
-A Visual Studio 2022 extension (VSIX) + MCP server that gives GitHub Copilot full D365FO X++ awareness — language knowledge, project context, and **16 metadata tools** that create, read, update, validate, search, and manage X++ objects through the official MetaModel API.
+A Visual Studio 2022 extension (VSIX) + MCP server that gives GitHub Copilot full D365FO X++ awareness — language knowledge, project context, and **25 metadata tools** that create, read, update, validate, search, and manage X++ objects through the official MetaModel API.
 
 ---
 
@@ -22,22 +22,23 @@ The result is that Copilot generates invalid or dangerous code — modifying bas
 
 This extension solves the problem at three levels:
 
-### 1. MCP Server with 22 Metadata Tools
+### 1. MCP Server with 25 Metadata Tools
 
-A standalone MCP (Model Context Protocol) server (`XppMcpServer.exe`) exposes 22 tools that Copilot can call directly. These tools use the D365FO MetaModel API — the **same API that Visual Studio uses internally** — to manipulate metadata with full type safety.
+A standalone MCP (Model Context Protocol) server (`XppMcpServer.exe`) exposes 25 tools that Copilot can call directly. These tools use the D365FO MetaModel API — the **same API that Visual Studio uses internally** — to manipulate metadata with full type safety.
 
 | Tool | Description |
 |---|---|
 | `xpp_create_object` | Create any of 19 base object types, extensions (table, enum, EDT, form, menu, data entity, security), composite data entities, label files and menu extensions, with strongly-typed JSON metadata. All-or-nothing: relations are checked before saving, a failed metadata apply rolls the object back, an existing name is never overwritten, the object is added to the active project and the response ends with a `Validation:` line; a failed validation returns an error |
 | `xpp_read_object` | Read object declaration, methods, and typed metadata (properties, fields, indexes, etc.). Objects over 25,000 characters return a summary first; `sections` returns only the parts you need |
-| `xpp_update_object` | Update declaration, methods, or metadata on existing custom objects |
+| `xpp_update_object` | Update declaration, methods, or metadata on existing custom objects (every supported type, including menu items, services, tiles and configuration keys) |
 | `xpp_validate_object` | Validate that an object exists and has the expected metadata; project membership is required only for objects of the project's model |
 | `xpp_find_object` | Search for objects by name pattern and type; security roles, duties and privileges also by their label text (closest labels when no exact wording matches) |
 | `xpp_list_objects` | Look up a handful of objects by a specific name substring |
 | `xpp_list_model_objects` | List what one model contains (counts per type, then paged names) — reads the model index on disk, outside VS |
 | `xpp_find_references` | Query the cross-reference database for all objects that use/reference a given object; `includeCode` also shows the calling code lines |
 | `xpp_find_examples` | Standard implementations to reuse or copy: for a task ("batch job with a contract", "number sequence", forms with a pattern) or objects similar to a given one |
-| `xpp_search_code` | Text or regex search over the X++ code of every package (classes, tables, forms, views, entities, queries, maps) |
+| `xpp_search_code` | Text or regex search over the X++ code of every package (classes, tables, forms, views, entities, queries, maps); `model` takes a model or a package |
+| `xpp_analyze_security` | Security and licensing from the metadata: the license a role, duty or privilege needs (from the menu items' View/Maintain user license) and what drives it, who can access a menu item, form, table or entity, security gaps in your models, segregation-of-duties conflicts (built-in or your own rules) and a Markdown/CSV sign-off report |
 | `xpp_get_object_type_schema` | Return the generated JSON schema for a metadata type via reflective type inspection |
 | `xpp_get_form_layout` | Show a form's data sources and control tree with all extensions merged and attributed — the survey step before placing form-extension controls |
 | `xpp_get_model_info` | Get model descriptor (layer, references, dependencies) |
