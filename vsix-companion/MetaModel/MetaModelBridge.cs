@@ -28,6 +28,10 @@ namespace XppAiCopilotCompanion.MetaModel
     /// </summary>
     public sealed partial class MetaModelBridge : IMetaModelBridge
     {
+        /// <summary>A type of the Finance and Operations tools; resolving it fails when the tools are not installed.</summary>
+        [System.Runtime.CompilerServices.MethodImpl(System.Runtime.CompilerServices.MethodImplOptions.NoInlining)]
+        internal static Type FinanceOperationsToolsType() => typeof(IMetaModelService);
+
         private IMetaModelService _metaService;
         private IMetaModelProviders _metaProviders;
         

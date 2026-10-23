@@ -1,26 +1,28 @@
 ﻿<?xml version="1.0" encoding="utf-8"?>
 <PackageManifest Version="2.0.0" xmlns="http://schemas.microsoft.com/developer/vsx-schema/2011" xmlns:d="http://schemas.microsoft.com/developer/vsx-schema-design/2011">
   <Metadata>
-    <Identity Id="XppAiCopilotCompanion" Version="0.5.20" Language="en-US" Publisher="Mohamed Nazmi" />
-    <DisplayName>X++ AI Copilot Companion</DisplayName>
-    <Description xml:space="preserve">Visual Studio UI-first companion extension that builds selective X++ AI context in-process and supports open-document edits and project file operations via Visual Studio APIs.</Description>
+    <Identity Id="XppAiCopilotCompanion" Version="0.5.32" Language="en-US" Publisher="MNazmi" />
+    <DisplayName>F&amp;O Studio AI Companion</DisplayName>
+    <Description xml:space="preserve">GitHub Copilot agent tools for Dynamics 365 Finance and Operations (X++): create, read and change metadata through the MetaModel API, build, references, code examples, code search and security analysis. Requires the Finance and Operations tools.</Description>
     <MoreInfo>https://github.com/nazmolla/XppAiCopilotCompanion</MoreInfo>
+    <License>LICENSE.txt</License>
     <Icon>Resources\Icon.png</Icon>
-    <Tags>X++, D365FO, Dynamics 365, Copilot, AI, Finance and Operations</Tags>
+    <Tags>X++;D365FO;Dynamics 365;Finance and Operations;Copilot;MCP;AI;F&amp;O Studio</Tags>
   </Metadata>
   <Installation AllUsers="false" InstalledByMsi="false">
-    <InstallationTarget Id="Microsoft.VisualStudio.Community" Version="[17.0,18.0)">
+    <InstallationTarget Id="Microsoft.VisualStudio.Community" Version="[17.14,19.0)">
       <ProductArchitecture>amd64</ProductArchitecture>
     </InstallationTarget>
-    <InstallationTarget Id="Microsoft.VisualStudio.Pro" Version="[17.0,18.0)">
+    <InstallationTarget Id="Microsoft.VisualStudio.Pro" Version="[17.14,19.0)">
       <ProductArchitecture>amd64</ProductArchitecture>
     </InstallationTarget>
-    <InstallationTarget Id="Microsoft.VisualStudio.Enterprise" Version="[17.0,18.0)">
+    <InstallationTarget Id="Microsoft.VisualStudio.Enterprise" Version="[17.14,19.0)">
       <ProductArchitecture>amd64</ProductArchitecture>
     </InstallationTarget>
   </Installation>
   <Prerequisites>
-    <Prerequisite Id="Microsoft.VisualStudio.Component.CoreEditor" Version="[17.0,18.0)" DisplayName="Visual Studio core editor" />
+    <Prerequisite Id="Microsoft.VisualStudio.Component.CoreEditor" Version="[17.0,19.0)" DisplayName="Visual Studio core editor" />
+    <Prerequisite Id="Component.VisualStudio.GitHub.Copilot" Version="[17.0,19.0)" DisplayName="GitHub Copilot" />
   </Prerequisites>
   <Dependencies>
     <Dependency Id="Microsoft.Framework.NDP" DisplayName=".NET Framework" d:Source="Manual" Version="[4.8,)" />

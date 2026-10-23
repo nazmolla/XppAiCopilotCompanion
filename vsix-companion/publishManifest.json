@@ -1,0 +1,13 @@
+{
+  "$schema": "http://json.schemastore.org/vsix-publish",
+  "categories": [ "coding", "programming languages" ],
+  "identity": {
+    "internalName": "fno-studio-ai-companion"
+  },
+  "overview": "../README.md",
+  "priceCategory": "free",
+  "publisher": "MNazmi",
+  "private": false,
+  "qna": true,
+  "repo": "https://github.com/nazmolla/XppAiCopilotCompanion"
+}

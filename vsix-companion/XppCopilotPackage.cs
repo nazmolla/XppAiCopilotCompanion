@@ -65,6 +65,11 @@ namespace XppAiCopilotCompanion
             // delegate to real IMetaModelService APIs inside this VS process.
             StartMetaModelBridge();
 
+            // The Finance and Operations tools are a requirement that the manifest cannot express (their VSIX identity
+            // differs between environments), so it is checked here.
+            if (!FinanceOperationsToolsAvailable())
+                ShowMissingFinanceOperationsTools();
+
             // Trigger a config refresh after VS startup settles so Copilot
             // re-reads MCP configuration in sessions where discovery happens early.
             _ = TouchMcpConfigsAfterDelayAsync();
@@ -826,6 +831,49 @@ namespace XppAiCopilotCompanion
                 File.WriteAllText(Path.Combine(dir, "system-prompt.txt"), promptText, System.Text.Encoding.UTF8);
             }
             catch { }
+        }
+
+        /// <summary>True when the Finance and Operations (Dynamics 365) tools' metadata API can be loaded.</summary>
+        private static bool FinanceOperationsToolsAvailable()
+        {
+            try
+            {
+                return ProbeMetaModelType() != null;
+            }
+            catch (Exception ex) when (ex is FileNotFoundException || ex is FileLoadException || ex is TypeLoadException
+                || ex is BadImageFormatException)
+            {
+                return false;
+            }
+        }
+
+        // Separate method: the D365FO assembly is resolved when this method is compiled, so a missing assembly
+        // surfaces as an exception the caller can catch.
+        [System.Runtime.CompilerServices.MethodImpl(System.Runtime.CompilerServices.MethodImplOptions.NoInlining)]
+        private static Type ProbeMetaModelType() => MetaModel.MetaModelBridge.FinanceOperationsToolsType();
+
+        private void ShowMissingFinanceOperationsTools()
+        {
+            ThreadHelper.ThrowIfNotOnUIThread();
+            const string text = "F&O Studio AI Companion needs the Finance and Operations (Dynamics 365) tools for Visual Studio. "
+                + "Install them (for example with Power Platform Tools: connect to your environment and download the Finance and Operations assets), then restart Visual Studio. "
+                + "Until then, the tools that create, read and change metadata are unavailable.";
+            OutputPane.Write(text);
+            try
+            {
+                var shell = GetService(typeof(Microsoft.VisualStudio.Shell.Interop.SVsShell)) as Microsoft.VisualStudio.Shell.Interop.IVsShell;
+                var factory = GetService(typeof(Microsoft.VisualStudio.Shell.Interop.SVsInfoBarUIFactory)) as Microsoft.VisualStudio.Shell.Interop.IVsInfoBarUIFactory;
+                if (shell == null || factory == null) return;
+                if (shell.GetProperty((int)Microsoft.VisualStudio.Shell.Interop.__VSSPROPID7.VSSPROPID_MainWindowInfoBarHost, out object hostObj) != 0) return;
+                var host = hostObj as Microsoft.VisualStudio.Shell.Interop.IVsInfoBarHost;
+                if (host == null) return;
+                var infoBar = new Microsoft.VisualStudio.Shell.InfoBarModel(text, Microsoft.VisualStudio.Imaging.KnownMonikers.StatusWarning, isCloseButtonVisible: true);
+                host.AddInfoBar(factory.CreateInfoBar(infoBar));
+            }
+            catch (Exception ex)
+            {
+                System.Diagnostics.Debug.WriteLine("[XppCopilot] Info bar failed: " + ex.Message);
+            }
         }
 
         private void StartMetaModelBridge()

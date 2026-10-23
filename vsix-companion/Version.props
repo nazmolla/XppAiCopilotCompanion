@@ -13,7 +13,7 @@
   <PropertyGroup>
     <VersionMajor>0</VersionMajor>
     <VersionMinor>5</VersionMinor>
-    <VersionPatch>20</VersionPatch>
+    <VersionPatch>32</VersionPatch>
     <VersionSuffix></VersionSuffix>
 
     <!-- Derived â€” do not edit -->

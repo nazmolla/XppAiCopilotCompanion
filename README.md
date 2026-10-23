@@ -1,6 +1,16 @@
-# X++ AI Copilot Companion
+# F&O Studio AI Companion
 
-A Visual Studio 2022 extension (VSIX) + MCP server that gives GitHub Copilot full D365FO X++ awareness — language knowledge, project context, and **25 metadata tools** that create, read, update, validate, search, and manage X++ objects through the official MetaModel API.
+A Visual Studio extension (VSIX) + MCP server that gives GitHub Copilot full D365FO X++ awareness — language knowledge, project context, and **25 metadata tools** that create, read, update, validate, search, and manage X++ objects through the official MetaModel API. It is the Visual Studio sibling of [F&O Studio for VS Code](https://marketplace.visualstudio.com/items?itemName=MNazmi.xpp-vscode) and shares its AI tools.
+
+## Requirements
+
+| Requirement | Why |
+|---|---|
+| **Visual Studio 2022 17.14 or later, or Visual Studio 2026** (Community, Professional or Enterprise) | Copilot agent mode with MCP servers arrived in 17.14 |
+| **GitHub Copilot** (Visual Studio component, with a Copilot subscription) | The tools are used from Copilot Chat in agent mode. The installer requires the component |
+| **Finance and Operations (Dynamics 365) tools for Visual Studio** | All metadata tools run through its MetaModel API. Install it from your environment (Power Platform Tools: connect and download the Finance and Operations assets) or use a cloud-hosted development VM. It is not on the Marketplace, so the installer cannot check it: the extension shows a warning in Visual Studio when it is missing |
+| **.NET Framework 4.8** | Runtime of the extension and the MCP server |
+| Cross-reference database (optional) | `xpp_find_references`, `xpp_find_examples` and where-used checks need a build with *Build cross reference data* |
 
 ---
 
@@ -164,10 +174,11 @@ For detailed architecture diagrams, design decisions, data flow, reliability mec
 
 ### Prerequisites
 
-- Visual Studio 2022 (17.14+) — Community, Professional, or Enterprise
-- .NET Framework 4.8
-- Visual Studio SDK workload (for building from source)
-- D365FO development tools extension (Microsoft.Dynamics.FinOps.ToolsVS2022)
+See [Requirements](#requirements). Building from source also needs the **Visual Studio extension development** workload.
+
+### Install from the Marketplace
+
+In Visual Studio: **Extensions > Manage Extensions**, search for **F&O Studio AI Companion**, install, and restart Visual Studio.
 
 ### Build from Source
 
