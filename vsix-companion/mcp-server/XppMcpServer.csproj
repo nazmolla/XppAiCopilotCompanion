@@ -38,6 +38,13 @@
     <Compile Include="Program.cs" />
     <Compile Include="ToolRouter.cs" />
     <Compile Include="XRefQuery.cs" />
+    <Compile Include="MessageTrace.cs" />
+    <Compile Include="AgentGuide.cs" />
+  </ItemGroup>
+  <ItemGroup>
+    <EmbeddedResource Include="..\Resources\XppCopilotGuide.txt">
+      <LogicalName>XppAiCopilotCompanion.McpServer.Guide.txt</LogicalName>
+    </EmbeddedResource>
   </ItemGroup>
   <Import Project="$(MSBuildToolsPath)\Microsoft.CSharp.targets" />
 </Project>

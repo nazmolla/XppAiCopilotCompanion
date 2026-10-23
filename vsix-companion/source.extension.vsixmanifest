@@ -1,7 +1,7 @@
 ﻿<?xml version="1.0" encoding="utf-8"?>
 <PackageManifest Version="2.0.0" xmlns="http://schemas.microsoft.com/developer/vsx-schema/2011" xmlns:d="http://schemas.microsoft.com/developer/vsx-schema-design/2011">
   <Metadata>
-    <Identity Id="XppAiCopilotCompanion" Version="0.5.34" Language="en-US" Publisher="MNazmi" />
+    <Identity Id="XppAiCopilotCompanion" Version="0.5.38" Language="en-US" Publisher="MNazmi" />
     <DisplayName>F&amp;O Studio AI Companion</DisplayName>
     <Description xml:space="preserve">GitHub Copilot agent tools for Dynamics 365 Finance and Operations (X++): create, read and change metadata through the MetaModel API, build, references, code examples, code search and security analysis. Requires the Finance and Operations tools.</Description>
     <MoreInfo>https://github.com/nazmolla/XppAiCopilotCompanion</MoreInfo>
