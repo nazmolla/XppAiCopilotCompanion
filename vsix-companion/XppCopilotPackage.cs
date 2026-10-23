@@ -173,6 +173,16 @@ namespace XppAiCopilotCompanion
                     if (aliveOk)
                     {
                         serverAlreadyAlive = true;
+                        // The running server exits when no registered Visual Studio is left: register this one.
+                        try
+                        {
+                            using (var http = new System.Net.WebClient())
+                                http.DownloadString(defaultMcpUrl + "register?pid=" + System.Diagnostics.Process.GetCurrentProcess().Id);
+                        }
+                        catch (Exception regEx)
+                        {
+                            report.AppendLine("Registering with the running MCP server failed: " + regEx.Message);
+                        }
                         report.AppendLine("Existing MCP server on " + defaultMcpUrl + " is alive and current — skipping restart.");
                         report.AppendLine(aliveDetails);
                     }
@@ -654,6 +664,8 @@ namespace XppAiCopilotCompanion
                 var psi = new ProcessStartInfo
                 {
                     FileName = exePath,
+                    // The server exits when this Visual Studio (and any other that registers) has closed.
+                    Arguments = "--parent " + System.Diagnostics.Process.GetCurrentProcess().Id,
                     UseShellExecute = false,
                     CreateNoWindow = true,
                     RedirectStandardError = true,

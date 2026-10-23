@@ -42,10 +42,69 @@ namespace XppAiCopilotCompanion.McpServer
 
             bool useStdio = Array.Exists(args, a => a.Equals("--stdio", StringComparison.OrdinalIgnoreCase));
 
+            // The server lives as long as the Visual Studio instances that use it: the one that started it (--parent)
+            // and the ones that found it running and registered (GET /register?pid=). It exits when none is left.
+            int parentIndex = Array.FindIndex(args, a => a.Equals("--parent", StringComparison.OrdinalIgnoreCase));
+            if (parentIndex >= 0 && parentIndex + 1 < args.Length && int.TryParse(args[parentIndex + 1], out int parentPid))
+                RegisterParent(parentPid);
+            StartParentWatchdog();
+
             if (useStdio)
                 RunStdio();
             else
                 RunHttp();
+        }
+
+        // ── Lifetime: exit when no registered Visual Studio is running ──
+
+        private static readonly System.Collections.Generic.HashSet<int> Parents = new System.Collections.Generic.HashSet<int>();
+
+        internal static void RegisterParent(int pid)
+        {
+            lock (Parents)
+            {
+                if (Parents.Add(pid)) McpLogger.Log("Registered Visual Studio pid=" + pid);
+            }
+        }
+
+        private static void StartParentWatchdog()
+        {
+            var thread = new Thread(() =>
+            {
+                while (true)
+                {
+                    Thread.Sleep(5000);
+                    int[] pids;
+                    lock (Parents) pids = new System.Collections.Generic.List<int>(Parents).ToArray();
+                    if (pids.Length == 0) continue;   // started without --parent (manual run): stay up
+                    foreach (int pid in pids)
+                        if (!IsAlive(pid))
+                            lock (Parents)
+                            {
+                                Parents.Remove(pid);
+                                McpLogger.Log("Visual Studio pid=" + pid + " exited.");
+                            }
+                    bool none;
+                    lock (Parents) none = Parents.Count == 0;
+                    if (none)
+                    {
+                        McpLogger.Log("No Visual Studio left; MCP server exiting.");
+                        Environment.Exit(0);
+                    }
+                }
+            }) { IsBackground = true, Name = "ParentWatchdog" };
+            thread.Start();
+        }
+
+        private static bool IsAlive(int pid)
+        {
+            try
+            {
+                using (var p = System.Diagnostics.Process.GetProcessById(pid))
+                    return !p.HasExited;
+            }
+            catch (ArgumentException) { return false; }
+            catch { return true; }   // no access: assume it is still running
         }
 
         // ── HTTP mode ──
@@ -107,6 +166,14 @@ namespace XppAiCopilotCompanion.McpServer
                     ctx.Response.AddHeader("Access-Control-Allow-Headers", "Content-Type");
                     ctx.Response.StatusCode = 204;
                     ctx.Response.Close();
+                    return;
+                }
+
+                if (ctx.Request.HttpMethod == "GET" && ctx.Request.Url.AbsolutePath.TrimEnd('/').Equals("/register", StringComparison.OrdinalIgnoreCase))
+                {
+                    bool ok = int.TryParse(ctx.Request.QueryString["pid"], out int pid);
+                    if (ok) RegisterParent(pid);
+                    SendJsonResponse(ctx, ok ? 200 : 400, ok ? "{\"registered\":" + pid + "}" : "{\"error\":\"pid is required\"}");
                     return;
                 }
 
