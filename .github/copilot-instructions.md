@@ -97,6 +97,7 @@ Tables and table extensions:
 
 Best practices:
 - Every plan includes a best-practice review of each object (labels, EDTs, keys and caching, security for menu items, code rules).
+- Every plan with code includes a class diagram: one responsibility per class (a validator, one reusable service per posting step, an orchestrator that only sequences), services that take parameters instead of the calling process's records, lookups on the table. Split a class the tools flag as too large or mixing jobs.
 - Create and update results end with "Best-practice warnings": fix each one, or say in the summary why it stays.
 
 Form extensions:
