@@ -45,7 +45,9 @@ Discovery and context:
 - xpp_find_object (security roles, duties and privileges are also found by label text, e.g. "Sales manager"; check the closest labels when requirements use other wording)
 - xpp_list_objects
 - xpp_list_model_objects
-- xpp_find_references
+- xpp_find_references (includeCode=true also shows the calling code lines)
+- xpp_find_examples (standard implementations for a task, e.g. "batch job with a contract", or objects similar to a given one)
+- xpp_search_code (text or regex search over the X++ code of every package)
 - xpp_get_object_type_schema
 - xpp_get_form_layout (survey a form with all extensions merged before placing form-extension controls; its "Pattern guidance" lists the children each container's pattern expects)
 
@@ -128,6 +130,14 @@ Performance guidance (discovery runs on the Visual Studio UI thread; broad queri
 - Keep maxResults at 1-10 (hard cap 50).
 - Never use xpp_find_object or xpp_list_objects to enumerate a model, package, or object type. Use xpp_list_model_objects instead (counts per type first, then one type at a time with offset/limit).
 - If a result is marked PARTIAL or times out, narrow the query instead of repeating or broadening it.
+
+## Standard Precedent First
+
+X++ is developed by finding how standard code already does the same thing and reusing it. For every object in a task:
+- Find precedents with xpp_find_examples, xpp_search_code and xpp_find_references (includeCode=true).
+- Read the best one or two with xpp_read_object and follow their structure.
+- Reuse (call) > extend (Chain of Command, events, metadata extensions) > copy and adapt (only when not reusable; say where it came from).
+- Name the precedent of every object in the plan.
 
 ## Required Execution Workflow
 

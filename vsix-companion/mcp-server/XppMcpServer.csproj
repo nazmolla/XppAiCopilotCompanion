@@ -20,12 +20,15 @@
     <Reference Include="System.Runtime.Serialization" />
     <Reference Include="System.Web.Extensions" />
     <Reference Include="System.Xml" />
+    <Reference Include="System.Xml.Linq" />
   </ItemGroup>
   <ItemGroup>
     <Compile Include="..\DynamicsConfigurationReader.cs">
       <Link>DynamicsConfigurationReader.cs</Link>
     </Compile>
     <Compile Include="BridgeClient.cs" />
+    <Compile Include="CodeExamples.cs" />
+    <Compile Include="CodeSearch.cs" />
     <Compile Include="DocSearchHandler.cs" />
     <Compile Include="HtmlExtractor.cs" />
     <Compile Include="JsonHelpers.cs" />

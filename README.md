@@ -35,7 +35,9 @@ A standalone MCP (Model Context Protocol) server (`XppMcpServer.exe`) exposes 22
 | `xpp_find_object` | Search for objects by name pattern and type; security roles, duties and privileges also by their label text (closest labels when no exact wording matches) |
 | `xpp_list_objects` | Look up a handful of objects by a specific name substring |
 | `xpp_list_model_objects` | List what one model contains (counts per type, then paged names) — reads the model index on disk, outside VS |
-| `xpp_find_references` | Query the cross-reference database for all objects that use/reference a given object |
+| `xpp_find_references` | Query the cross-reference database for all objects that use/reference a given object; `includeCode` also shows the calling code lines |
+| `xpp_find_examples` | Standard implementations to reuse or copy: for a task ("batch job with a contract", "number sequence", forms with a pattern) or objects similar to a given one |
+| `xpp_search_code` | Text or regex search over the X++ code of every package (classes, tables, forms, views, entities, queries, maps) |
 | `xpp_get_object_type_schema` | Return the generated JSON schema for a metadata type via reflective type inspection |
 | `xpp_get_form_layout` | Show a form's data sources and control tree with all extensions merged and attributed — the survey step before placing form-extension controls |
 | `xpp_get_model_info` | Get model descriptor (layer, references, dependencies) |
