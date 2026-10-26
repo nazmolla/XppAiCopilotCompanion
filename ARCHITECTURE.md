@@ -26,7 +26,7 @@
 │  ┌────────────────────────────────────────────────────────────────┐ │
 │  │  MCP Server (XppMcpServer.exe — port 21329)                    │ │
 │  │                                                                │ │
-│  │  22 tools exposed via Model Context Protocol (SSE/HTTP)        │ │
+│  │  27 tools exposed via Model Context Protocol (SSE/HTTP)        │ │
 │  │  ┌──────────────────┬──────────────────┬────────────────────┐ │ │
 │  │  │ xpp_create_object│ xpp_read_object  │ xpp_update_object  │ │ │
 │  │  │ xpp_find_object  │ xpp_list_objects │ xpp_find_references│ │ │

@@ -1,6 +1,6 @@
 # F&O Studio AI Companion
 
-A Visual Studio extension (VSIX) + MCP server that gives GitHub Copilot full D365FO X++ awareness — language knowledge, project context, and **25 metadata tools** that create, read, update, validate, search, and manage X++ objects through the official MetaModel API. It is the Visual Studio sibling of [F&O Studio for VS Code](https://marketplace.visualstudio.com/items?itemName=MNazmi.xpp-vscode) and shares its AI tools.
+A Visual Studio extension (VSIX) + MCP server that gives GitHub Copilot full D365FO X++ awareness — language knowledge, project context, and **27 tools** that create, read, update, validate, search, and manage X++ objects through the official MetaModel API. It is the Visual Studio sibling of [F&O Studio for VS Code](https://marketplace.visualstudio.com/items?itemName=MNazmi.xpp-vscode) and shares its AI tools.
 
 ## Requirements
 
@@ -32,9 +32,9 @@ The result is that Copilot generates invalid or dangerous code — modifying bas
 
 This extension solves the problem at three levels:
 
-### 1. MCP Server with 25 Metadata Tools
+### 1. MCP Server with 27 Tools
 
-A standalone MCP (Model Context Protocol) server (`XppMcpServer.exe`) exposes 25 tools that Copilot can call directly. These tools use the D365FO MetaModel API — the **same API that Visual Studio uses internally** — to manipulate metadata with full type safety.
+A standalone MCP (Model Context Protocol) server (`XppMcpServer.exe`) exposes 27 tools that Copilot can call directly. These tools use the D365FO MetaModel API — the **same API that Visual Studio uses internally** — to manipulate metadata with full type safety.
 
 | Tool | Description |
 |---|---|
@@ -48,7 +48,9 @@ A standalone MCP (Model Context Protocol) server (`XppMcpServer.exe`) exposes 25
 | `xpp_find_references` | Query the cross-reference database for all objects that use/reference a given object; `includeCode` also shows the calling code lines |
 | `xpp_find_examples` | Standard implementations to reuse or copy: for a task ("batch job with a contract", "number sequence", forms with a pattern) or objects similar to a given one |
 | `xpp_search_code` | Text or regex search over the X++ code of every package (classes, tables, forms, views, entities, queries, maps); `model` takes a model or a package |
-| `xpp_analyze_security` | Security and licensing from the metadata: the license a role, duty or privilege needs (from the menu items' View/Maintain user license) and what drives it, who can access a menu item, form, table or entity, security gaps in your models, segregation-of-duties conflicts (built-in or your own rules) and a Markdown/CSV sign-off report |
+| `xpp_analyze_security` | Security and licensing from the metadata: the license a role, duty or privilege needs (from the menu items' View/Maintain user license) and what drives it, who can access a menu item, form, table or entity, the standard roles to give a new duty (requirements name roles by job title), security gaps in your models, segregation-of-duties conflicts (built-in or your own rules) and a Markdown/CSV sign-off report |
+| `xpp_find_message_source` | The code behind an error, warning or info message: the message as the user saw it (values included) is matched against every label text, then the label's usages come from the cross-reference database with the code line |
+| `xpp_get_guide` | The full development guide by topic (SSRS reports, Chain of Command per object type, event handlers, X++ language reference, object properties); the always-loaded instructions are its compact summary |
 | `xpp_get_object_type_schema` | Return the generated JSON schema for a metadata type via reflective type inspection |
 | `xpp_get_form_layout` | Show a form's data sources and control tree with all extensions merged and attributed — the survey step before placing form-extension controls |
 | `xpp_get_model_info` | Get model descriptor (layer, references, dependencies) |
@@ -233,7 +235,7 @@ The MCP server is registered automatically when the VSIX loads. You can also use
 
 ### Using with Copilot Chat
 
-Once the MCP server is registered, Copilot Chat in Visual Studio can call the 16 `xpp_*` tools directly. Examples:
+Once the MCP server is registered, Copilot Chat in Visual Studio can call the 27 `xpp_*` tools directly. Examples:
 
 - *"Create an AxEnum called MyStatus with values None, Active, and Closed"*
 - *"Read the CustTable and show me its fields and indexes"*
